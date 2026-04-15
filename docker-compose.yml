@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: spotly-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: spotly_user
+      POSTGRES_PASSWORD: spotly_password
+      POSTGRES_DB: SpotlyDb
+    ports:
+      - "5433:5432" # Dışarıdan 5433 ile bağlanacağız, içeride 5432'ye gidecek
+    volumes:
+      - spotly_db_data:/var/lib/postgresql/data
+
+volumes:
+  spotly_db_data:
