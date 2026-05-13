@@ -52,11 +52,13 @@ export default function Explore() {
   const [startName, setStartName]           = useState<string | null>(null)
   const [endName, setEndName]               = useState<string | null>(null)
   const [zoneError, setZoneError]           = useState(false)
+  const [osrmError, setOsrmError]           = useState(false)
   const [routes, setRoutes]                 = useState<RouteOption[]>([])
   const [selectedRouteId, setSelectedRouteId] = useState<'A' | 'B' | 'C' | null>(null)
   const [calculating, setCalculating]       = useState(false)
   const [routeError, setRouteError]         = useState<string | null>(null)
   const zoneErrorTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const osrmErrorTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     api.get<Place[]>('/places').then(({ data }) => setPlaces(data))
@@ -90,6 +92,12 @@ export default function Explore() {
     setZoneError(true)
     if (zoneErrorTimer.current) clearTimeout(zoneErrorTimer.current)
     zoneErrorTimer.current = setTimeout(() => setZoneError(false), 3000)
+  }
+
+  function handleOsrmError() {
+    setOsrmError(true)
+    if (osrmErrorTimer.current) clearTimeout(osrmErrorTimer.current)
+    osrmErrorTimer.current = setTimeout(() => setOsrmError(false), 5000)
   }
 
   function clearSelections() {
@@ -381,6 +389,7 @@ export default function Explore() {
             activeRoute={activeRoute}
             onMapClick={handleMapClick}
             onOutOfZone={handleOutOfZone}
+            onOsrmError={handleOsrmError}
             onSetStart={handleSetStart}
             onSetEnd={handleSetEnd}
           />
@@ -394,6 +403,18 @@ export default function Explore() {
             <div className="flex items-center gap-2.5 bg-gray-900/90 backdrop-blur-sm text-white text-sm font-medium px-4 py-3 rounded-2xl shadow-xl">
               <span className="text-base">📍</span>
               <span>Seçtiğiniz nokta Spotly hizmet alanı dışındadır.</span>
+            </div>
+          </div>
+
+          {/* ── OSRM Hata Toast ── */}
+          <div
+            className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-[1001] transition-all duration-300 ${
+              osrmError ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 bg-red-900/90 backdrop-blur-sm text-white text-sm font-medium px-4 py-3 rounded-2xl shadow-xl">
+              <span className="text-base">⚠️</span>
+              <span>Yol ağına bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.</span>
             </div>
           </div>
         </div>

@@ -7,15 +7,35 @@ import type { Place, Coords, PlaceInRoute, RouteOption } from '../../types'
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1/walking'
 
 async function fetchOsrmPath(waypoints: [number, number][]): Promise<[number, number][]> {
-  // OSRM formatı: lng,lat nokta çiftleri ";" ile ayrılır
-  const coords = waypoints.map(([lat, lng]) => `${lng},${lat}`).join(';')
-  const url = `${OSRM_BASE}/${coords}?overview=full&geometries=geojson`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('OSRM isteği başarısız')
+  // waypoints = [[lat, lng], ...] → OSRM'e "lng,lat;lng,lat" formatında gönder
+  const coordStr = waypoints.map((wp) => `${wp[1]},${wp[0]}`).join(';')
+  const url = `${OSRM_BASE}/${coordStr}?overview=full&geometries=geojson`
+
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch (networkErr) {
+    console.error('[OSRM] Ağ hatası (CORS veya bağlantı):', networkErr)
+    throw networkErr
+  }
+
+  if (!res.ok) {
+    console.error('[OSRM] HTTP hatası:', res.status, res.statusText, '— URL:', url)
+    throw new Error(`OSRM HTTP ${res.status}`)
+  }
+
   const json = await res.json()
-  if (json.code !== 'Ok' || !json.routes?.[0]) throw new Error('OSRM rota bulunamadı')
-  // GeoJSON koordinatları [lng, lat] → Leaflet için [lat, lng] çevir
-  return json.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number])
+  console.log('[OSRM] yanıt kodu:', json.code, '| koordinat sayısı:', json.routes?.[0]?.geometry?.coordinates?.length)
+
+  if (json.code !== 'Ok' || !json.routes?.[0]?.geometry?.coordinates?.length) {
+    console.error('[OSRM] Geçersiz yanıt:', json)
+    throw new Error(`OSRM code: ${json.code}`)
+  }
+
+  // GeoJSON → [lng, lat] dizisi. Leaflet [lat, lng] ister: coord[1], coord[0]
+  return json.routes[0].geometry.coordinates.map(
+    (coord: number[]) => [coord[1], coord[0]] as [number, number]
+  )
 }
 
 function isPointInPolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
@@ -211,6 +231,7 @@ export interface SpotlyMapProps {
   activeRoute?:  RouteOption | null
   onMapClick:    (c: Coords) => void
   onOutOfZone?:  () => void
+  onOsrmError?:  () => void
   onSetStart:    (p: Place) => void
   onSetEnd:      (p: Place) => void
 }
@@ -225,10 +246,12 @@ export default function SpotlyMap({
   activeRoute,
   onMapClick,
   onOutOfZone,
+  onOsrmError,
   onSetStart,
   onSetEnd,
 }: SpotlyMapProps) {
   const selectionDone = !!(startCoords && endCoords)
+  // null = henüz yüklenmedi/rota yok, [] değil — sadece fetch tamamlanınca dolu array gelir
   const [osrmPath, setOsrmPath] = useState<[number, number][] | null>(null)
 
   // OSRM gerçek yol ağı çekimi — activeRoute değişince tetiklenir
@@ -238,11 +261,20 @@ export default function SpotlyMap({
       return
     }
     let cancelled = false
+    setOsrmPath(null) // önceki rotayı temizle, çizgi bekleme sırasında görünmesin
     fetchOsrmPath(activeRoute.waypoints)
-      .then((path) => { if (!cancelled) setOsrmPath(path) })
-      .catch(() => { if (!cancelled) setOsrmPath(null) })
+      .then((path) => {
+        if (!cancelled) setOsrmPath(path)
+      })
+      .catch((err) => {
+        console.error('[OSRM] Rota alınamadı, çizgi gösterilmeyecek:', err)
+        if (!cancelled) {
+          setOsrmPath(null)
+          onOsrmError?.()
+        }
+      })
     return () => { cancelled = true }
-  }, [activeRoute])
+  }, [activeRoute, onOsrmError])
 
   useEffect(() => {
     return () => {
@@ -300,18 +332,16 @@ export default function SpotlyMap({
       {/* ── Aktif rota polyline + durak marker'ları ── */}
       {activeRoute && activeRoute.waypoints.length >= 2 && (
         <>
-          {/* Gerçek yol ağı (OSRM) veya fallback kuş uçuşu */}
-          {(osrmPath ?? activeRoute.waypoints).length >= 2 && (
+          {/* OSRM gerçek sokak geometrisi — sadece fetch tamamlanınca render edilir, fallback YOK */}
+          {osrmPath && osrmPath.length >= 2 && (
             <>
-              {/* Gölge hattı — yol efekti */}
               <Polyline
-                positions={osrmPath ?? activeRoute.waypoints}
+                positions={osrmPath}
                 pathOptions={{ color: '#fff', weight: 9, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
               />
-              {/* Ana rota hattı — sage premium tema */}
               <Polyline
-                positions={osrmPath ?? activeRoute.waypoints}
-                pathOptions={{ color: '#879F84', weight: 5, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }}
+                positions={osrmPath}
+                pathOptions={{ color: '#879F84', weight: 5, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }}
               />
             </>
           )}
