@@ -12,19 +12,46 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
-def nearest_neighbor_order(start: tuple, end: tuple, places: list) -> list:
-    """Greedy nearest-neighbor sıralaması: start'tan başla, en yakın ziyaret edilmemişi seç."""
-    if not places:
-        return []
-    ordered: list = []
-    remaining = list(places)
-    cur_lat, cur_lng = start
-    while remaining:
-        nearest = min(remaining, key=lambda p: haversine(cur_lat, cur_lng, p.latitude, p.longitude))
-        ordered.append(nearest)
-        cur_lat, cur_lng = nearest.latitude, nearest.longitude
-        remaining.remove(nearest)
-    return ordered
+def _project_km(lat: float, lon: float, origin_lat: float) -> tuple:
+    """Küçük bölge için ekvatoryal düzlem yaklaşımı: (x_km, y_km)."""
+    R = 6371.0
+    x = math.radians(lon) * R * math.cos(math.radians(origin_lat))
+    y = math.radians(lat) * R
+    return x, y
+
+
+def corridor_metrics(start: tuple, end: tuple, p_lat: float, p_lng: float) -> tuple:
+    """
+    Start→End çizgisine göre noktanın (along_km, perp_km, t) değerleri.
+    along_km: çizgi boyunca ilerleme (start=0, end=direct_dist)
+    perp_km : çizgiye dik sapma (mutlak değer)
+    t       : normalize [0..1] (0=start, 1=end). 0..1 dışı → koridor dışında.
+    """
+    origin_lat = start[0]
+    sx, sy = _project_km(start[0], start[1], origin_lat)
+    ex, ey = _project_km(end[0],   end[1],   origin_lat)
+    px, py = _project_km(p_lat,    p_lng,    origin_lat)
+    dx, dy = ex - sx, ey - sy
+    line_len2 = dx * dx + dy * dy
+    if line_len2 < 1e-9:
+        return 0.0, math.hypot(px - sx, py - sy), 0.0
+    t = ((px - sx) * dx + (py - sy) * dy) / line_len2
+    proj_x = sx + t * dx
+    proj_y = sy + t * dy
+    perp = math.hypot(px - proj_x, py - proj_y)
+    along = t * math.sqrt(line_len2)
+    return along, perp, t
+
+
+def sort_by_projection(start: tuple, end: tuple, places: list) -> list:
+    """
+    Durakları start→end vektörü üzerindeki izdüşümlerine (along-track t) göre artan
+    sırada diz. Haversine değil; geri-dönüş (backtracking) matematiksel olarak imkansız.
+    """
+    def key(p):
+        _along, _perp, t = corridor_metrics(start, end, p.latitude, p.longitude)
+        return t
+    return sorted(places, key=key)
 
 
 def route_distance(start: tuple, end: tuple, places: list) -> float:
@@ -39,20 +66,47 @@ def route_distance(start: tuple, end: tuple, places: list) -> float:
     return dist
 
 
-def select_places(candidates: list, start: tuple, end: tuple, budget: float, max_count: int) -> list:
+def _in_bbox(start: tuple, end: tuple, lat: float, lng: float, pad_km: float) -> bool:
+    """start→end ekseninin oluşturduğu bbox + pad mesafesi içinde mi?"""
+    # 1° lat ≈ 111 km; 1° lng ≈ 111 * cos(lat) km
+    pad_lat = pad_km / 111.0
+    pad_lng = pad_km / (111.0 * math.cos(math.radians((start[0] + end[0]) / 2)))
+    lat_lo, lat_hi = min(start[0], end[0]) - pad_lat, max(start[0], end[0]) + pad_lat
+    lng_lo, lng_hi = min(start[1], end[1]) - pad_lng, max(start[1], end[1]) + pad_lng
+    return lat_lo <= lat <= lat_hi and lng_lo <= lng <= lng_hi
+
+
+def select_corridor_places(candidates: list, start: tuple, end: tuple,
+                           max_perp_km: float, max_count: int, budget_km: float,
+                           t_margin: float = 0.02) -> list:
     """
-    Puan sırasına göre sıralanmış aday mekanlardan greedy ile seç:
-    toplam rota mesafesi budget'ı aşmayacak ve en fazla max_count nokta olacak şekilde.
+    Katı koridor filtresi: ana güzergaha dik sapma + bounding box.
+    Yüksek puanlıdan başla, budget'ı aşmadan ve izdüşüm sırasında yerleştir.
+
+    - max_perp_km : çizgiye izin verilen MUTLAK maks. dik sapma (default 350m)
+    - t_margin    : start/end taşması neredeyse yok (~ 0.02)
+    - Ayrıca BBOX filtresi: max_perp_km kadar padlenmiş dikdörtgen dışındaki
+      hiçbir nokta dikkate alınmaz (çift güvenlik).
     """
+    in_corridor = []
+    for p in candidates:
+        # BBOX ön filtresi (ucuz)
+        if not _in_bbox(start, end, p.latitude, p.longitude, max_perp_km):
+            continue
+        # Dikey sapma + izdüşüm aralığı (kesin)
+        _along, perp, t = corridor_metrics(start, end, p.latitude, p.longitude)
+        if perp <= max_perp_km and -t_margin <= t <= 1.0 + t_margin:
+            in_corridor.append(p)
+
     selected: list = []
-    for place in candidates:
+    for p in in_corridor:
         if len(selected) >= max_count:
             break
-        test = selected + [place]
-        ordered = nearest_neighbor_order(start, end, test)
-        if route_distance(start, end, ordered) <= budget:
-            selected.append(place)
-    return nearest_neighbor_order(start, end, selected)
+        test = sort_by_projection(start, end, selected + [p])
+        if route_distance(start, end, test) <= budget_km:
+            selected.append(p)
+
+    return sort_by_projection(start, end, selected)
 
 
 def build_route(route_id: str, label: str, description: str,
@@ -95,29 +149,22 @@ def calculate_routes(start_lat: float, start_lng: float,
     start = (start_lat, start_lng)
     end   = (end_lat,   end_lng)
 
-    # Sıfır mesafe koruması
     direct_dist = max(haversine(start_lat, start_lng, end_lat, end_lng), 0.15)
 
-    # Mekanları puana göre sırala
+    # Mekanları puana göre sırala (yüksekten düşüğe) — koridor filtresi sonrası greedy seçim
     score_col = Place.photo_score if route_type == 'photo' else Place.tourist_score
     all_places = db.query(Place).order_by(score_col.desc()).all()
 
-    # ── Rota A: Minimalist — direct path üzerindeki 2 durak (bireysel overhead ≤ %40) ──
-    a_candidates = [
-        p for p in all_places
-        if (haversine(start_lat, start_lng, p.latitude, p.longitude) +
-            haversine(p.latitude, p.longitude, end_lat, end_lng)) / direct_dist - 1 <= 0.40
-    ]
-    route_a = select_places(a_candidates, start, end, direct_dist * 1.35, 2)
-
-    # ── Rota B: Dengeli — %30 uzunluk artışıyla 4 durak ──
-    route_b = select_places(all_places, start, end, direct_dist * 1.30, 4)
-
-    # ── Rota C: Tam Deneyim — %60 uzunluk artışıyla 7 durak ──
-    route_c = select_places(all_places, start, end, direct_dist * 1.60, 7)
+    # ── Tek rota: Minimalist — en kısa ve verimli ──
+    # Katı koridor: 350m MUTLAK dik sapma, rota uzunluğundan bağımsız
+    # Budget 1.15× → mahalle değiştiren detour mümkün değil
+    route_a = select_corridor_places(
+        all_places, start, end,
+        max_perp_km=0.35,
+        max_count=2,
+        budget_km=direct_dist * 1.15,
+    )
 
     return [
-        build_route('A', 'Minimalist',    'Hızlı & Odaklı',        route_a, start, end, route_type),
-        build_route('B', 'Dengeli',       'Denge & Keşif',          route_b, start, end, route_type),
-        build_route('C', 'Tam Deneyim',   'Derinlemesine Gezi',     route_c, start, end, route_type),
+        build_route('A', 'Minimalist', 'Hızlı & Odaklı', route_a, start, end, route_type),
     ]

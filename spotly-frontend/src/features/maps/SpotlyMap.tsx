@@ -1,8 +1,63 @@
-import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Polygon, Marker, Tooltip, Popup, Polyline, useMapEvents } from 'react-leaflet'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { MapContainer, TileLayer, GeoJSON, Polygon, Marker, Tooltip, Popup, Polyline, useMapEvents } from 'react-leaflet'
 import type { Marker as LMarker } from 'leaflet'
 import L from 'leaflet'
 import type { Place, Coords, PlaceInRoute, RouteOption } from '../../types'
+import { DISTRICTS } from '../../assets/districts.geojson'
+
+// Mapbox Directions API — yaya (walking) profili, gerçek pedestrian graf'ı
+const MAPBOX_WALKING = 'https://api.mapbox.com/directions/v5/mapbox/walking'
+const MAPBOX_TOKEN   = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined
+
+interface DirResult {
+  path: [number, number][]
+  distanceKm: number
+}
+
+function toCoordStr(waypoints: [number, number][]): string {
+  // [lat,lng] → Mapbox "lng,lat;lng,lat" formatı
+  return waypoints.map((wp) => `${wp[1]},${wp[0]}`).join(';')
+}
+
+function parseGeoJsonCoords(coords: number[][]): [number, number][] {
+  // GeoJSON [lng, lat] → Leaflet [lat, lng]
+  return coords.map((c) => [c[1], c[0]] as [number, number])
+}
+
+function buildMapboxUrl(waypoints: [number, number][]): string {
+  if (!MAPBOX_TOKEN) {
+    throw new Error('VITE_MAPBOX_TOKEN tanımlı değil — .env dosyasını kontrol et')
+  }
+  const params = new URLSearchParams({
+    geometries: 'geojson',
+    overview: 'full',
+    access_token: MAPBOX_TOKEN,
+  })
+  return `${MAPBOX_WALKING}/${toCoordStr(waypoints)}?${params}`
+}
+
+async function fetchMapboxWalking(
+  waypoints: [number, number][],
+  signal?: AbortSignal,
+): Promise<DirResult> {
+  const url = buildMapboxUrl(waypoints)
+  // Token'ı log'a yazma — yalnızca path
+  console.log('[Mapbox walking] →', url.replace(/access_token=[^&]+/, 'access_token=***'))
+
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Mapbox HTTP ${res.status} — ${text.slice(0, 200)}`)
+  }
+  const json = await res.json()
+  if (json.code !== 'Ok' || !json.routes?.[0]?.geometry?.coordinates?.length) {
+    throw new Error(`Mapbox code: ${json.code} — ${json.message ?? ''}`)
+  }
+  const path = parseGeoJsonCoords(json.routes[0].geometry.coordinates)
+  const distanceKm = (json.routes[0].distance ?? 0) / 1000
+  console.log(`[Mapbox walking] ✓ ${path.length} nokta | ${distanceKm.toFixed(3)} km`)
+  return { path, distanceKm }
+}
 
 function isPointInPolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
   const n = polygon.length
@@ -31,26 +86,34 @@ L.Icon.Default.mergeOptions({
 const MAP_CENTER: [number, number] = [41.022, 28.974]
 const MAP_ZOOM = 13
 
-const WORLD_RING: [number, number][] = [[-90,-180],[-90,180],[90,180],[90,-180]]
+// ── Odak ilçesi: Fatih ──
+// GeoJSON [lng, lat] → Leaflet [lat, lng]. Sadece Fatih feature'ı kullanılır.
+function extractFatihRing(): [number, number][] {
+  const fatih = DISTRICTS.features.find((f) => f.properties?.name === 'Fatih')
+  if (!fatih) return []
+  const g = fatih.geometry
+  if (g.type === 'Polygon') return g.coordinates[0].map((c) => [c[1], c[0]] as [number, number])
+  if (g.type === 'MultiPolygon') return g.coordinates[0][0].map((c) => [c[1], c[0]] as [number, number])
+  return []
+}
+const FATIH_RING: [number, number][] = extractFatihRing()
 
-// Spotly Operasyon Alanı — sabit, kullanıcı tarafından belirlenmiş kesin koordinatlar
-// Backend ile %100 aynı polygon (features/places filtresi). Denize taşmadan çizilmiştir.
-const SPOTLY_ZONE: [number, number][] = [
-  // ── Batı Sınırı (Surlar — Yedikule'den Ayvansaray'a)
-  [40.991, 28.920], [41.000, 28.922], [41.016, 28.925], [41.031, 28.936], [41.040, 28.943],
-  // ── Kuzey Sınırı (İç kesimler — Kasımpaşa, Taksim, Yıldız)
-  [41.033, 28.955], [41.038, 28.980], [41.045, 28.995], [41.053, 29.010],
-  // ── Doğu Ucu (Ortaköy)
-  [41.048, 29.027],
-  // ── Boğaz Sahil Hattı (Beşiktaş, Kabataş, Karaköy — denize taşmadan)
-  [41.042, 29.008], [41.035, 28.992], [41.026, 28.982], [41.022, 28.976],
-  // ── Tarihi Yarımada Sahil Hattı (Eminönü, Sarayburnu, Kumkapı, Yedikule)
-  [41.016, 28.976], [41.014, 28.985], [41.005, 28.978], [41.000, 28.958], [40.995, 28.940],
-  [40.991, 28.920],
-]
-const MASK: [number, number][][] = [WORLD_RING, SPOTLY_ZONE]
+// Dünya dış halkası — donut polygon için (Leaflet'in dış ring'i)
+const WORLD_RING: [number, number][] = [[-90, -180], [-90, 180], [90, 180], [90, -180]]
 
-// ── Pin Fabrikası ──────────────────────────────────────────────────────────
+// Click validasyonu için tek bölge: Fatih
+const ZONES: [number, number][][] = [FATIH_RING]
+
+// Maske donut'u: dış ring = dünya, delik = Fatih
+const FOCUS_MASK: [number, number][][] = [WORLD_RING, FATIH_RING]
+
+// Fatih sınırını sadece outer ring olarak ayrı bir FeatureCollection halinde çiziyoruz
+// (GeoJSON içindeki tüm feature'lar yerine sadece Fatih — Beyoğlu görsel olarak gizli)
+const FATIH_BOUNDARY = {
+  type: 'FeatureCollection' as const,
+  features: DISTRICTS.features.filter((f) => f.properties?.name === 'Fatih'),
+}
+
 function makePin(bg: string, size = 18): L.DivIcon {
   return L.divIcon({
     className: '',
@@ -67,9 +130,9 @@ function makePin(bg: string, size = 18): L.DivIcon {
   })
 }
 
-const PLACE_ICON = makePin('#ef4444', 16)  // red — normal mekan
-const START_ICON = makePin('#10b981', 22)  // emerald — başlangıç
-const END_ICON   = makePin('#3b82f6', 22)  // blue — bitiş
+const PLACE_ICON = makePin('#ef4444', 16)
+const START_ICON = makePin('#10b981', 22)
+const END_ICON   = makePin('#3b82f6', 22)
 
 function makeWaypointPin(n: number): L.DivIcon {
   return L.divIcon({
@@ -89,7 +152,6 @@ function makeWaypointPin(n: number): L.DivIcon {
   })
 }
 
-// ── Harita tıklama yakalayıcı ──────────────────────────────────────────────
 function MapClickHandler({ onMapClick, onOutOfZone, done }: {
   onMapClick: (c: Coords) => void
   onOutOfZone?: () => void
@@ -99,7 +161,9 @@ function MapClickHandler({ onMapClick, onOutOfZone, done }: {
     click: (e) => {
       if (done) return
       const { lat, lng } = e.latlng
-      if (isPointInPolygon(lat, lng, SPOTLY_ZONE)) {
+      // İki bölgeden herhangi birinin içinde mi? (Tarihi Yarımada VEYA Beyoğlu/Beşiktaş)
+      const inAnyZone = ZONES.some((zone) => isPointInPolygon(lat, lng, zone))
+      if (inAnyZone) {
         onMapClick({ lat, lng })
       } else {
         onOutOfZone?.()
@@ -110,7 +174,6 @@ function MapClickHandler({ onMapClick, onOutOfZone, done }: {
   return null
 }
 
-// ── Tek bir mekan marker'ı ─────────────────────────────────────────────────
 interface PlaceMarkerProps {
   place:      Place
   isStart:    boolean
@@ -122,30 +185,20 @@ interface PlaceMarkerProps {
 function PlaceMarker({ place, isStart, isEnd, onSetStart, onSetEnd }: PlaceMarkerProps) {
   const markerRef = useRef<LMarker>(null)
   const icon = isStart ? START_ICON : isEnd ? END_ICON : PLACE_ICON
-
   function closePopup() { markerRef.current?.closePopup() }
 
   return (
-    <Marker
-      ref={markerRef}
-      position={[place.latitude, place.longitude]}
-      icon={icon}
-    >
-      {/* Hover tooltip */}
+    <Marker ref={markerRef} position={[place.latitude, place.longitude]} icon={icon}>
       <Tooltip direction="top" offset={[0, -10]} opacity={1}>
         <span style={{ fontSize: 12, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap' }}>
           {place.name}
         </span>
       </Tooltip>
-
-      {/* Tıklama popup */}
       <Popup closeButton={false} minWidth={190} maxWidth={220}>
         <div style={{ padding: '6px 2px 2px' }}>
           <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: 13, color: '#111827', lineHeight: 1.3 }}>
             {place.name}
           </p>
-
-          {/* Skor satırı */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             <span style={{ fontSize: 10, fontWeight: 600, color: '#7c3aed', background: '#ede9fe', borderRadius: 20, padding: '2px 8px' }}>
               📸 {place.photo_score}
@@ -154,8 +207,6 @@ function PlaceMarker({ place, isStart, isEnd, onSetStart, onSetEnd }: PlaceMarke
               🏛 {place.tourist_score}
             </span>
           </div>
-
-          {/* Aksiyon butonları */}
           <div style={{ display: 'flex', gap: 6 }}>
             <button
               onClick={() => { onSetStart(place); closePopup() }}
@@ -186,19 +237,20 @@ function PlaceMarker({ place, isStart, isEnd, onSetStart, onSetEnd }: PlaceMarke
   )
 }
 
-// ── Ana bileşen ────────────────────────────────────────────────────────────
 export interface SpotlyMapProps {
-  routeType?:    'photo' | 'tourist' | null
-  places?:       Place[]
-  startCoords:   Coords | null
-  endCoords:     Coords | null
-  startPlaceId?: number | null
-  endPlaceId?:   number | null
-  activeRoute?:  RouteOption | null
-  onMapClick:    (c: Coords) => void
-  onOutOfZone?:  () => void
-  onSetStart:    (p: Place) => void
-  onSetEnd:      (p: Place) => void
+  routeType?:        'photo' | 'tourist' | null
+  places?:           Place[]
+  startCoords:       Coords | null
+  endCoords:         Coords | null
+  startPlaceId?:     number | null
+  endPlaceId?:       number | null
+  activeRoute?:      RouteOption | null
+  onMapClick:        (c: Coords) => void
+  onOutOfZone?:      () => void
+  onOsrmError?:      () => void
+  onBaselineDist?:   (km: number) => void
+  onSetStart:        (p: Place) => void
+  onSetEnd:          (p: Place) => void
 }
 
 export default function SpotlyMap({
@@ -211,10 +263,117 @@ export default function SpotlyMap({
   activeRoute,
   onMapClick,
   onOutOfZone,
+  onOsrmError,
+  onBaselineDist,
   onSetStart,
   onSetEnd,
 }: SpotlyMapProps) {
   const selectionDone = !!(startCoords && endCoords)
+  const [experiencePath, setExperiencePath] = useState<[number, number][] | null>(null)
+  const [baselinePath, setBaselinePath] = useState<[number, number][] | null>(null)
+
+  // ── Fatih sınırı içindeki mekanları filtrele (Point-in-Polygon) ──
+  // Backend SPOTLY_ZONE'u daha geniş kapsam içerebilir; frontend'de gerçek Fatih GeoJSON
+  // sınırına göre keskin filtre uygulayarak sadece çalışma alanı içindeki POI'leri tutuyoruz.
+  // useMemo: places reference değişmedikçe filtre tekrar çalıştırılmaz.
+  const placesInZone = useMemo(
+    () => places.filter((p) => isPointInPolygon(p.latitude, p.longitude, FATIH_RING)),
+    [places],
+  )
+
+  // ── Filtrelenmiş POI marker'larını useMemo ile cache'le ──
+  // Marker JSX dizisi yalnızca filtrelenmiş liste veya seçim değiştiğinde yeniden üretilir.
+  // Map zoom/pan veya başka state değişikliği marker render'ını tetiklemez.
+  const placeMarkers = useMemo(
+    () => placesInZone.map((p) => (
+      <PlaceMarker
+        key={p.id}
+        place={p}
+        isStart={p.id === startPlaceId}
+        isEnd={p.id === endPlaceId}
+        onSetStart={onSetStart}
+        onSetEnd={onSetEnd}
+      />
+    )),
+    [placesInZone, startPlaceId, endPlaceId, onSetStart, onSetEnd],
+  )
+
+  const onOsrmErrorRef = useRef(onOsrmError)
+  const onBaselineDistRef = useRef(onBaselineDist)
+  useEffect(() => { onOsrmErrorRef.current = onOsrmError })
+  useEffect(() => { onBaselineDistRef.current = onBaselineDist })
+
+  // ── KOTA KORUMASI ──
+  // Son tamamlanan istek imzalarını sakla; aynı koordinatlar için tekrar fetch atma.
+  // Bu sayede prop reference'ı değişse bile aynı veri için Mapbox'a tekrar gidilmez.
+  const lastBaselineKeyRef = useRef<string | null>(null)
+  const lastExperienceKeyRef = useRef<string | null>(null)
+
+  // ── Baseline (kırmızı) — start+end seçilir seçilmez en kısa yaya rotası ──
+  // SADECE primitif dependency'ler kullanılır → useEffect referans değişimiyle tetiklenmez
+  const sLat = startCoords?.lat, sLng = startCoords?.lng
+  const eLat = endCoords?.lat,   eLng = endCoords?.lng
+  useEffect(() => {
+    if (sLat == null || sLng == null || eLat == null || eLng == null) {
+      setBaselinePath(null)
+      lastBaselineKeyRef.current = null
+      return
+    }
+    // Yüksek hassasiyetli koordinat imzası (6 ondalık ≈ 11cm)
+    const key = `${sLat.toFixed(6)},${sLng.toFixed(6)}→${eLat.toFixed(6)},${eLng.toFixed(6)}`
+    if (key === lastBaselineKeyRef.current && baselinePath) {
+      // Aynı koordinatlar için tekrar API'ye gitme
+      return
+    }
+    const ac = new AbortController()
+    setBaselinePath(null)
+    fetchMapboxWalking([[sLat, sLng], [eLat, eLng]], ac.signal)
+      .then(({ path, distanceKm }) => {
+        lastBaselineKeyRef.current = key
+        setBaselinePath(path)
+        onBaselineDistRef.current?.(distanceKm)
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return
+        console.error('[Mapbox baseline] Rota alınamadı:', err)
+        setBaselinePath(null)
+      })
+    return () => { ac.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sLat, sLng, eLat, eLng])
+
+  // ── Experience (yeşil) — aktif rota durakları üzerinden yaya rotası ──
+  // activeRoute'un waypoints içeriğini stringe çevirip stabil bir dep olarak kullan.
+  // (Aksi halde her render'da yeni activeRoute reference geldiğinde gereksiz fetch atılır.)
+  const wpKey = activeRoute && activeRoute.waypoints.length >= 2
+    ? activeRoute.waypoints.map(([la, lo]) => `${la.toFixed(6)},${lo.toFixed(6)}`).join('|')
+    : null
+  useEffect(() => {
+    if (!wpKey || !activeRoute) {
+      setExperiencePath(null)
+      lastExperienceKeyRef.current = null
+      return
+    }
+    if (wpKey === lastExperienceKeyRef.current && experiencePath) {
+      return
+    }
+    const ac = new AbortController()
+    setExperiencePath(null)
+    fetchMapboxWalking(activeRoute.waypoints, ac.signal)
+      .then(({ path }) => {
+        lastExperienceKeyRef.current = wpKey
+        console.log('Ekrana Çizilen Yol Noktası Sayısı:', path.length)
+        setExperiencePath(path)
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return
+        console.error('[Mapbox experience] Rota alınamadı:', err)
+        setExperiencePath(null)
+        onOsrmErrorRef.current?.()
+      })
+    return () => { ac.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wpKey])
 
   useEffect(() => {
     return () => {
@@ -234,34 +393,51 @@ export default function SpotlyMap({
       zoomControl
     >
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        subdomains="abcd"
+        url={`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`}
+        attribution='&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        tileSize={512}
+        zoomOffset={-1}
         maxZoom={20}
       />
 
-      {/* Dramatik maske */}
+      {/* ── Odaklanma Maskesi (Focus Mask) ──
+          Donut polygon: dış halka = dünya, delik = Fatih ilçesi.
+          Fatih içerisi pırıl pırıl Mapbox; dışarısı açık beyaz tülün arkasında puslu. */}
       <Polygon
-        positions={MASK}
-        pathOptions={{ fillColor: '#000', fillOpacity: 0.70, weight: 0, stroke: false, interactive: false }}
+        positions={FOCUS_MASK}
+        pathOptions={{
+          fillColor: 'white',
+          fillOpacity: 0.5,
+          stroke: false,
+          weight: 0,
+          interactive: false,
+        }}
       />
 
-      {/* Harita tıklama */}
+      {/* ── Fatih sınır çizgisi (oyulmuş iç sınır, sage kesik çizgi) ── */}
+      <GeoJSON
+        key="fatih-boundary"
+        data={FATIH_BOUNDARY}
+        style={{
+          fill: false,
+          fillOpacity: 0,
+          color: '#879F84',
+          weight: 4,
+          opacity: 0.95,
+          dashArray: '10, 10',
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+        }}
+      />
+
       <MapClickHandler onMapClick={onMapClick} onOutOfZone={onOutOfZone} done={selectionDone} />
 
-      {/* Mekan pinleri */}
-      {places.map((p) => (
-        <PlaceMarker
-          key={p.id}
-          place={p}
-          isStart={p.id === startPlaceId}
-          isEnd={p.id === endPlaceId}
-          onSetStart={onSetStart}
-          onSetEnd={onSetEnd}
-        />
-      ))}
+      {/* ── Tüm POI marker'ları (useMemo cache'li) ──
+          Fatih'in zenginliği: kapsama uyan tüm mekanlar limit YOK çizilir.
+          useMemo sayesinde props değişmedikçe JSX dizisi yeniden üretilmez. */}
+      {placeMarkers}
 
-      {/* Serbest tıklama ile seçilen koordinatlar (place seçimi yoksa) */}
       {startCoords && !startPlaceId && (
         <Marker position={[startCoords.lat, startCoords.lng]} icon={START_ICON} />
       )}
@@ -269,35 +445,45 @@ export default function SpotlyMap({
         <Marker position={[endCoords.lat, endCoords.lng]} icon={END_ICON} />
       )}
 
-      {/* ── Aktif rota polyline + durak marker'ları ── */}
-      {activeRoute && activeRoute.waypoints.length >= 2 && (
-        <>
-          {/* Gölge hattı — yol efekti */}
-          <Polyline
-            positions={activeRoute.waypoints}
-            pathOptions={{ color: '#fff', weight: 9, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
-          />
-          {/* Ana rota hattı */}
-          <Polyline
-            positions={activeRoute.waypoints}
-            pathOptions={{ color: '#6A8267', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
-          />
-          {/* Durak noktaları */}
-          {activeRoute.places.map((place: PlaceInRoute) => (
-            <Marker
-              key={`wp-${place.id}`}
-              position={[place.latitude, place.longitude]}
-              icon={makeWaypointPin(place.order)}
-            >
-              <Tooltip direction="top" offset={[0, -14]} opacity={1} permanent={false}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#3d4c3b' }}>
-                  {place.order}. {place.name}
-                </span>
-              </Tooltip>
-            </Marker>
-          ))}
-        </>
+      {/* ── Baseline (kırmızı kesik çizgi) — her zaman alt katmanda referans ── */}
+      {baselinePath && baselinePath.length > 1 && (
+        <Polyline
+          positions={baselinePath}
+          smoothFactor={0}
+          pathOptions={{
+            color: '#EF4444',
+            weight: 3,
+            opacity: 0.85,
+            dashArray: '8,8',
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
+        />
       )}
+
+      {/* ── Experience (sage) — kullanıcının seçtiği rotanın gerçek sokak geometrisi ── */}
+      {activeRoute && activeRoute.waypoints.length >= 2 && experiencePath && experiencePath.length > 10 && (
+        <Polyline
+          positions={experiencePath}
+          smoothFactor={0}
+          pathOptions={{ color: '#879F84', weight: 6, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
+        />
+      )}
+
+      {/* Durak noktaları (numaralı pinler) */}
+      {activeRoute && activeRoute.waypoints.length >= 2 && activeRoute.places.map((place: PlaceInRoute) => (
+        <Marker
+          key={`wp-${place.id}`}
+          position={[place.latitude, place.longitude]}
+          icon={makeWaypointPin(place.order)}
+        >
+          <Tooltip direction="top" offset={[0, -14]} opacity={1} permanent={false}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#3d4c3b' }}>
+              {place.order}. {place.name}
+            </span>
+          </Tooltip>
+        </Marker>
+      ))}
     </MapContainer>
   )
 }

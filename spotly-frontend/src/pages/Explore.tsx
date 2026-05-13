@@ -56,6 +56,7 @@ export default function Explore() {
   const [selectedRouteId, setSelectedRouteId] = useState<'A' | 'B' | 'C' | null>(null)
   const [calculating, setCalculating]       = useState(false)
   const [routeError, setRouteError]         = useState<string | null>(null)
+  const [baselineDistKm, setBaselineDistKm] = useState<number | null>(null)
   const zoneErrorTimer                      = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -260,7 +261,7 @@ export default function Explore() {
                 <div className="border-t border-gray-100" />
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Rota Seçenekleri</p>
+                    <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Senin İçin Hesaplanan Rota</p>
                     <button
                       onClick={clearSelections}
                       className="flex items-center gap-1 text-xs text-gray-400 hover:text-sage-dark transition-colors"
@@ -291,7 +292,7 @@ export default function Explore() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-gray-900 leading-tight">{route.label}</p>
                             <p className="text-xs text-gray-400 mt-0.5 leading-snug">{route.description}</p>
-                            <div className="flex items-center gap-3 mt-2">
+                            <div className="flex items-center gap-3 mt-2 flex-wrap">
                               <span className="text-xs font-medium text-gray-500">
                                 📍 {route.places.length} durak
                               </span>
@@ -301,6 +302,17 @@ export default function Explore() {
                               <span className="text-xs font-medium text-gray-500">
                                 ⏱ {route.estimated_minutes} dk
                               </span>
+                              {baselineDistKm != null && (() => {
+                                const extraM = Math.max(0, Math.round((route.total_distance_km - baselineDistKm) * 1000))
+                                const label = extraM < 50
+                                  ? 'En kısa yol'
+                                  : extraM < 1000 ? `+${extraM} m` : `+${(extraM / 1000).toFixed(1)} km`
+                                return (
+                                  <span className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-full px-2 py-0.5">
+                                    {label === 'En kısa yol' ? '🔴 En kısa yol' : `🔴 ${label} fazla`}
+                                  </span>
+                                )
+                              })()}
                             </div>
                           </div>
                           <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center mt-0.5 ${isActive ? `${meta.border} bg-white` : 'border-gray-200'}`}>
@@ -381,6 +393,7 @@ export default function Explore() {
             activeRoute={activeRoute}
             onMapClick={handleMapClick}
             onOutOfZone={handleOutOfZone}
+            onBaselineDist={setBaselineDistKm}
             onSetStart={handleSetStart}
             onSetEnd={handleSetEnd}
           />
