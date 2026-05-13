@@ -251,17 +251,21 @@ export default function SpotlyMap({
   onSetEnd,
 }: SpotlyMapProps) {
   const selectionDone = !!(startCoords && endCoords)
-  // null = henüz yüklenmedi/rota yok, [] değil — sadece fetch tamamlanınca dolu array gelir
   const [osrmPath, setOsrmPath] = useState<[number, number][] | null>(null)
 
-  // OSRM gerçek yol ağı çekimi — activeRoute değişince tetiklenir
+  // onOsrmError'ı ref'te tut — dependency listesine girmesin, her render'da yeni
+  // fonksiyon ref'i useEffect'i gereksiz tetikler ve fetch'i iptal eder
+  const onOsrmErrorRef = useRef(onOsrmError)
+  useEffect(() => { onOsrmErrorRef.current = onOsrmError })
+
+  // OSRM gerçek yol ağı çekimi — yalnızca activeRoute değişince tetiklenir
   useEffect(() => {
     if (!activeRoute || activeRoute.waypoints.length < 2) {
       setOsrmPath(null)
       return
     }
     let cancelled = false
-    setOsrmPath(null) // önceki rotayı temizle, çizgi bekleme sırasında görünmesin
+    setOsrmPath(null)
     fetchOsrmPath(activeRoute.waypoints)
       .then((path) => {
         if (!cancelled) setOsrmPath(path)
@@ -270,11 +274,11 @@ export default function SpotlyMap({
         console.error('[OSRM] Rota alınamadı, çizgi gösterilmeyecek:', err)
         if (!cancelled) {
           setOsrmPath(null)
-          onOsrmError?.()
+          onOsrmErrorRef.current?.()
         }
       })
     return () => { cancelled = true }
-  }, [activeRoute, onOsrmError])
+  }, [activeRoute])
 
   useEffect(() => {
     return () => {
@@ -332,19 +336,14 @@ export default function SpotlyMap({
       {/* ── Aktif rota polyline + durak marker'ları ── */}
       {activeRoute && activeRoute.waypoints.length >= 2 && (
         <>
-          {/* OSRM gerçek sokak geometrisi — sadece fetch tamamlanınca render edilir, fallback YOK */}
-          {osrmPath && osrmPath.length >= 2 && (
-            <>
-              <Polyline
-                positions={osrmPath}
-                pathOptions={{ color: '#fff', weight: 9, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
-              />
-              <Polyline
-                positions={osrmPath}
-                pathOptions={{ color: '#879F84', weight: 5, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }}
-              />
-            </>
-          )}
+          {/* OSRM gerçek sokak geometrisi — fallback YOK, length>10 garantisi */}
+          {osrmPath && osrmPath.length > 10 ? (
+            <Polyline
+              positions={osrmPath}
+              smoothFactor={0}
+              pathOptions={{ color: '#879F84', weight: 5, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+            />
+          ) : null}
           {/* Durak noktaları */}
           {activeRoute.places.map((place: PlaceInRoute) => (
             <Marker
