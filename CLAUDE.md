@@ -216,10 +216,28 @@ cd spotly-frontend && npm run dev
   - `MainLayout.tsx`: `bg-white` → `bg-offwhite`
   - `Navbar.tsx`: `to="/#how-it-works"` → `to="/"` (hash router React Router'da güvenilir scroll yapmaz)
 
-### 🔜 Faz 14 — Sonraki Adım
-- `POST /routes/calculate` endpoint'i: start/end koordinatları + rota tipi alıp sıralı mekan listesi dönsün
-- "Bana Özel Rota Çiz" butonunu bu endpoint'e bağla
-- Hesaplanan rotanın mekanlarını haritada Leaflet Polyline ile birleştir
+### ✅ Faz 14 — 3 Kademeli Rota Hesaplama (Tamamlandı)
+- **Backend** `features/routes/` slice oluşturuldu:
+  - `schemas.py`: `RouteRequest`, `PlaceInRoute`, `RouteOption`, `RoutesResponse` Pydantic modelleri
+  - `logic.py`: Haversine mesafe, nearest-neighbor greedy sıralama, `select_places()` budget-aware seçim
+    - Rota A (Hızlı Tur): bireysel overhead ≤%40, max 2 durak, budget 1.35x
+    - Rota B (Standart Keşif): budget 1.30x direct, max 4 durak
+    - Rota C (Tam Deneyim): budget 1.60x direct, max 7 durak
+    - `estimated_minutes = round(dist * 13.3 + len(places) * 10)`
+  - `router.py`: `POST /routes/calculate` endpoint
+  - `main.py`'de `routes_router` kayıtlı
+- **Frontend** `types/index.ts`: `PlaceInRoute` ve `RouteOption` interface'leri eklendi
+- **SpotlyMap.tsx**: `activeRoute` prop, Polyline (beyaz gölge + sage ana hat), numaralı waypoint marker'ları (`makeWaypointPin`)
+- **Explore.tsx**: Tam rota akışı:
+  - `routes`, `selectedRouteId`, `calculating`, `routeError` state'leri
+  - `handleCalculate()`: API çağrısı, hata yönetimi, ilk rotayı otomatik seçer
+  - Rota kartları: Zap/Scale/Star ikonları (amber/sage/violet tema), durak listesi, mesafe/süre rozetleri
+  - "Rotayı Haritada Göster" butonu rota seçimini tamamlar
+  - `clearSelections()` rota sonuçlarını da sıfırlar
+
+### 🔜 Faz 15 — Sonraki Adım
+- Rota akışını son kullanıcı gözünden test et; edge case'ler: start == end, zone sınırına yakın noktalar
+- Profil sayfasına geçmiş rotaları kaydetme ve listeleme özelliği eklenebilir
 
 
 

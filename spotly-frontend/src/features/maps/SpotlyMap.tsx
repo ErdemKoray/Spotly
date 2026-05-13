@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Polygon, Marker, Tooltip, Popup, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Polygon, Marker, Tooltip, Popup, Polyline, useMapEvents } from 'react-leaflet'
 import type { Marker as LMarker } from 'leaflet'
 import L from 'leaflet'
-import type { Place, Coords } from '../../types'
+import type { Place, Coords, PlaceInRoute, RouteOption } from '../../types'
 
 function isPointInPolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
   const n = polygon.length
@@ -70,6 +70,24 @@ function makePin(bg: string, size = 18): L.DivIcon {
 const PLACE_ICON = makePin('#ef4444', 16)  // red — normal mekan
 const START_ICON = makePin('#10b981', 22)  // emerald — başlangıç
 const END_ICON   = makePin('#3b82f6', 22)  // blue — bitiş
+
+function makeWaypointPin(n: number): L.DivIcon {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:26px;height:26px;
+      background:#6A8267;
+      border:2.5px solid #fff;
+      border-radius:50%;
+      box-shadow:0 2px 10px rgba(0,0,0,0.40);
+      display:flex;align-items:center;justify-content:center;
+      color:#fff;font-size:11px;font-weight:800;
+    ">${n}</div>`,
+    iconSize:    [26, 26],
+    iconAnchor:  [13, 13],
+    popupAnchor: [0, -19],
+  })
+}
 
 // ── Harita tıklama yakalayıcı ──────────────────────────────────────────────
 function MapClickHandler({ onMapClick, onOutOfZone, done }: {
@@ -176,6 +194,7 @@ export interface SpotlyMapProps {
   endCoords:     Coords | null
   startPlaceId?: number | null
   endPlaceId?:   number | null
+  activeRoute?:  RouteOption | null
   onMapClick:    (c: Coords) => void
   onOutOfZone?:  () => void
   onSetStart:    (p: Place) => void
@@ -189,6 +208,7 @@ export default function SpotlyMap({
   endCoords,
   startPlaceId,
   endPlaceId,
+  activeRoute,
   onMapClick,
   onOutOfZone,
   onSetStart,
@@ -247,6 +267,36 @@ export default function SpotlyMap({
       )}
       {endCoords && !endPlaceId && (
         <Marker position={[endCoords.lat, endCoords.lng]} icon={END_ICON} />
+      )}
+
+      {/* ── Aktif rota polyline + durak marker'ları ── */}
+      {activeRoute && activeRoute.waypoints.length >= 2 && (
+        <>
+          {/* Gölge hattı — yol efekti */}
+          <Polyline
+            positions={activeRoute.waypoints}
+            pathOptions={{ color: '#fff', weight: 9, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
+          />
+          {/* Ana rota hattı */}
+          <Polyline
+            positions={activeRoute.waypoints}
+            pathOptions={{ color: '#6A8267', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
+          />
+          {/* Durak noktaları */}
+          {activeRoute.places.map((place: PlaceInRoute) => (
+            <Marker
+              key={`wp-${place.id}`}
+              position={[place.latitude, place.longitude]}
+              icon={makeWaypointPin(place.order)}
+            >
+              <Tooltip direction="top" offset={[0, -14]} opacity={1} permanent={false}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#3d4c3b' }}>
+                  {place.order}. {place.name}
+                </span>
+              </Tooltip>
+            </Marker>
+          ))}
+        </>
       )}
     </MapContainer>
   )
