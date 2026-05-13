@@ -1,8 +1,22 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Polygon, Marker, Tooltip, Popup, Polyline, useMapEvents } from 'react-leaflet'
 import type { Marker as LMarker } from 'leaflet'
 import L from 'leaflet'
 import type { Place, Coords, PlaceInRoute, RouteOption } from '../../types'
+
+const OSRM_BASE = 'https://router.project-osrm.org/route/v1/walking'
+
+async function fetchOsrmPath(waypoints: [number, number][]): Promise<[number, number][]> {
+  // OSRM formatı: lng,lat nokta çiftleri ";" ile ayrılır
+  const coords = waypoints.map(([lat, lng]) => `${lng},${lat}`).join(';')
+  const url = `${OSRM_BASE}/${coords}?overview=full&geometries=geojson`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('OSRM isteği başarısız')
+  const json = await res.json()
+  if (json.code !== 'Ok' || !json.routes?.[0]) throw new Error('OSRM rota bulunamadı')
+  // GeoJSON koordinatları [lng, lat] → Leaflet için [lat, lng] çevir
+  return json.routes[0].geometry.coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number])
+}
 
 function isPointInPolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
   const n = polygon.length
@@ -215,6 +229,20 @@ export default function SpotlyMap({
   onSetEnd,
 }: SpotlyMapProps) {
   const selectionDone = !!(startCoords && endCoords)
+  const [osrmPath, setOsrmPath] = useState<[number, number][] | null>(null)
+
+  // OSRM gerçek yol ağı çekimi — activeRoute değişince tetiklenir
+  useEffect(() => {
+    if (!activeRoute || activeRoute.waypoints.length < 2) {
+      setOsrmPath(null)
+      return
+    }
+    let cancelled = false
+    fetchOsrmPath(activeRoute.waypoints)
+      .then((path) => { if (!cancelled) setOsrmPath(path) })
+      .catch(() => { if (!cancelled) setOsrmPath(null) })
+    return () => { cancelled = true }
+  }, [activeRoute])
 
   useEffect(() => {
     return () => {
@@ -272,16 +300,21 @@ export default function SpotlyMap({
       {/* ── Aktif rota polyline + durak marker'ları ── */}
       {activeRoute && activeRoute.waypoints.length >= 2 && (
         <>
-          {/* Gölge hattı — yol efekti */}
-          <Polyline
-            positions={activeRoute.waypoints}
-            pathOptions={{ color: '#fff', weight: 9, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
-          />
-          {/* Ana rota hattı */}
-          <Polyline
-            positions={activeRoute.waypoints}
-            pathOptions={{ color: '#6A8267', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
-          />
+          {/* Gerçek yol ağı (OSRM) veya fallback kuş uçuşu */}
+          {(osrmPath ?? activeRoute.waypoints).length >= 2 && (
+            <>
+              {/* Gölge hattı — yol efekti */}
+              <Polyline
+                positions={osrmPath ?? activeRoute.waypoints}
+                pathOptions={{ color: '#fff', weight: 9, opacity: 0.45, lineCap: 'round', lineJoin: 'round' }}
+              />
+              {/* Ana rota hattı — sage premium tema */}
+              <Polyline
+                positions={osrmPath ?? activeRoute.waypoints}
+                pathOptions={{ color: '#879F84', weight: 5, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }}
+              />
+            </>
+          )}
           {/* Durak noktaları */}
           {activeRoute.places.map((place: PlaceInRoute) => (
             <Marker
