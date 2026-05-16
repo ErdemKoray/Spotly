@@ -235,7 +235,18 @@ cd spotly-frontend && npm run dev
   - "Rotayı Haritada Göster" butonu rota seçimini tamamlar
   - `clearSelections()` rota sonuçlarını da sıfırlar
 
-### 🔜 Faz 15 — Sonraki Adım
+### ✅ Faz 15 — OSRM Gerçek Yol Ağı Entegrasyonu (Tamamlandı)
+- Kuş uçuşu rota hatası düzeltildi; rotalar artık İstanbul'un gerçek sokak ağına (yaya profili) oturtuluyor.
+- **SpotlyMap.tsx** güncellemeleri:
+  - `OSRM_BASE = 'https://router.project-osrm.org/route/v1/walking'` sabit tanımlandı
+  - `fetchOsrmPath(waypoints)`: waypoints'i `lng,lat` formatına çevirip OSRM'e gönderir; GeoJSON `LineString` koordinatlarını Leaflet formatına (`[lat, lng]`) çevirir
+  - `useState<[number, number][] | null>(null)` → `osrmPath` state'i
+  - `useEffect([activeRoute])`: `activeRoute` değişince OSRM fetch tetiklenir; cancelled flag ile race condition koruması var
+  - Polyline render: `osrmPath ?? activeRoute.waypoints` — OSRM gelene kadar kuş uçuşu fallback; OSRM gelince gerçek sokak çizgisi
+  - Rota çizgisi: gölge `#fff weight:9` + ana hat `#879F84 (sage) weight:5` — premium tema korundu
+- **Doğrulama**: `_osrmDebug: done:625` — 625 koordinat başarıyla çekildi; SVG path 560 karakter (eski düz çizgi 24-32 chars'tı)
+
+### 🔜 Faz 16 — Sonraki Adım
 - Rota akışını son kullanıcı gözünden test et; edge case'ler: start == end, zone sınırına yakın noktalar
 - Profil sayfasına geçmiş rotaları kaydetme ve listeleme özelliği eklenebilir
 
