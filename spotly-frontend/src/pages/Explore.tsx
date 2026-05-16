@@ -139,19 +139,7 @@ export default function Explore() {
 
       {/* ══ Harita ══ */}
       <div className="absolute inset-0 z-0">
-        <SpotlyMap
-          places={places}
-          startCoords={startCoords}
-          endCoords={endCoords}
-          startPlaceId={startPlaceId}
-          endPlaceId={endPlaceId}
-          activeRoute={activeRoute}
-          onMapClick={handleMapClick}
-          onOutOfZone={handleOutOfZone}
-          onBaselineDist={setBaselineDistKm}
-          onSetStart={handleSetStart}
-          onSetEnd={handleSetEnd}
-        />
+        <SpotlyMap />
       </div>
 
       {/* ══ Floating Top Bar ══ */}
