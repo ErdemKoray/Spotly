@@ -5,6 +5,7 @@ import { AnimatedHero } from '@/components/ui/animated-hero-section-1'
 import { Button } from '@/components/ui/button'
 import Footer from '../components/layout/Footer'
 import { useAuth } from '../contexts/AuthContext'
+import { useAuthModal } from '../contexts/AuthModalContext'
 
 /* ─── İstanbul Fotoğrafı — Galata/Boğaz panoraması ─── */
 const BG_URL =
@@ -47,6 +48,7 @@ function fadeUpView(delay = 0) {
 export default function Home() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
+  const { openAuthModal } = useAuthModal()
 
   /* Sağ üst köşe için auth-aware aksiyon */
   const topRightAction = user ? (
@@ -61,26 +63,26 @@ export default function Home() {
       </Link>
       <button
         onClick={logout}
-        className="px-3 py-1.5 text-xs font-medium text-white/70 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg transition-all"
+        className="px-3 py-1.5 text-xs font-medium text-white/70 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg transition-all cursor-pointer"
       >
         Çıkış
       </button>
     </div>
   ) : (
     <div className="flex items-center gap-2">
-      <Link to="/auth">
-        <button className="px-3.5 py-1.5 text-sm font-medium text-white/80 hover:text-white transition-colors">
-          Giriş Yap
-        </button>
-      </Link>
-      <Link to="/auth?mode=register">
-        <Button
-          size="sm"
-          className="bg-white/10 backdrop-blur-sm border border-white/25 text-white hover:bg-white/20 transition-colors"
-        >
-          Kaydol
-        </Button>
-      </Link>
+      <button
+        onClick={() => openAuthModal('login')}
+        className="px-3.5 py-1.5 text-sm font-medium text-white/80 hover:text-white transition-colors cursor-pointer"
+      >
+        Giriş Yap
+      </button>
+      <Button
+        size="sm"
+        onClick={() => openAuthModal('register')}
+        className="bg-white/10 backdrop-blur-sm border border-white/25 text-white hover:bg-white/20 transition-colors cursor-pointer"
+      >
+        Kaydol
+      </Button>
     </div>
   )
 
@@ -165,20 +167,16 @@ export default function Home() {
             <p className="text-stone-400 text-base leading-relaxed max-w-sm">
               Ücretsiz hesap oluştur, ilk rotanı dakikalar içinde planla.
             </p>
-            <motion.div
+            <motion.button
+              onClick={() => openAuthModal('register')}
               whileHover={{ y: -3, boxShadow: '0 20px 40px -8px rgba(135,159,132,0.5)' }}
               whileTap={{ scale: 0.97 }}
               transition={{ duration: 0.18 }}
-              className="rounded-xl"
+              className="flex items-center gap-2.5 px-8 py-3.5 bg-sage hover:bg-sage-dark text-white font-semibold text-sm rounded-xl transition-colors duration-200 cursor-pointer"
             >
-              <Link
-                to="/auth?mode=register"
-                className="flex items-center gap-2.5 px-8 py-3.5 bg-sage hover:bg-sage-dark text-white font-semibold text-sm rounded-xl transition-colors duration-200"
-              >
-                Ücretsiz Kaydol
-                <ArrowRight size={16} strokeWidth={2.5} />
-              </Link>
-            </motion.div>
+              Ücretsiz Kaydol
+              <ArrowRight size={16} strokeWidth={2.5} />
+            </motion.button>
           </motion.div>
         </div>
       </section>

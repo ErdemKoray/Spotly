@@ -28,14 +28,14 @@ function IconLinkedIn() {
 
 export default function Footer() {
   return (
-    <footer className="border-t border-gray-100 bg-white">
+    <footer className="border-t border-sage/15 bg-offwhite">
       <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-6">
         <div className="flex flex-col items-center sm:items-start gap-1">
-          <div className="flex items-center gap-1.5 text-indigo-600 font-bold">
+          <div className="flex items-center gap-1.5 text-sage-dark font-bold">
             <Map size={16} strokeWidth={2.5} />
             Spotly
           </div>
-          <p className="text-xs text-gray-400 italic">Şehri senin ritminle keşfet.</p>
+          <p className="text-xs text-stone-400 italic">Şehri senin ritminle keşfet.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -48,14 +48,14 @@ export default function Footer() {
               key={label}
               href="#"
               aria-label={label}
-              className="w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:border-indigo-200 transition"
+              className="w-8 h-8 rounded-full border border-sage/20 flex items-center justify-center text-stone-400 hover:text-sage-dark hover:border-sage/40 transition-colors duration-200 cursor-pointer"
             >
               {icon}
             </a>
           ))}
         </div>
 
-        <p className="text-xs text-gray-400">© {new Date().getFullYear()} Spotly. Tüm hakları saklıdır.</p>
+        <p className="text-xs text-stone-400">© {new Date().getFullYear()} Spotly. Tüm hakları saklıdır.</p>
       </div>
     </footer>
   )

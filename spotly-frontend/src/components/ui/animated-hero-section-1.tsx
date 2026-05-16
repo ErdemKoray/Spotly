@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -91,17 +92,21 @@ export const AnimatedHero = ({
         {/* Logo */}
         <div className="flex items-center gap-2">{logo}</div>
 
-        {/* Nav Links */}
+        {/* Nav Links — dahili rotalar Link, hash/harici <a> */}
         <nav className="hidden md:flex items-center gap-1">
-          {navLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              className="px-3.5 py-1.5 text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-150"
-            >
-              {link.label}
-            </a>
-          ))}
+          {navLinks.map((link) => {
+            const isInternal = link.href.startsWith('/')
+            const cls = "px-3.5 py-1.5 text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-150"
+            return isInternal ? (
+              <Link key={link.label} to={link.href} className={cls}>
+                {link.label}
+              </Link>
+            ) : (
+              <a key={link.label} href={link.href} className={cls}>
+                {link.label}
+              </a>
+            )
+          })}
         </nav>
 
         {/* Sağ aksiyon */}

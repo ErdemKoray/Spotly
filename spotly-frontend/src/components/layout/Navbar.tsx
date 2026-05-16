@@ -1,6 +1,7 @@
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { LogOut, Map } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
+import { useAuthModal } from '../../contexts/AuthModalContext'
 
 function avatarUrl(firstName: string, lastName: string) {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(`${firstName}+${lastName}`)}&background=879F84&color=fff&size=80`
@@ -8,6 +9,21 @@ function avatarUrl(firstName: string, lastName: string) {
 
 export default function Navbar() {
   const { user, logout } = useAuth()
+  const { openAuthModal } = useAuthModal()
+  const navigate = useNavigate()
+
+  /* "Keşfet" tıklanınca: giriş yapıldıysa navigate, yapılmadıysa modal aç */
+  function handleExplore(e: React.MouseEvent) {
+    if (!user) {
+      e.preventDefault()
+      openAuthModal('login')
+    }
+  }
+
+  function handleLogout() {
+    logout()
+    navigate('/', { replace: true })
+  }
 
   return (
     <header className="fixed top-0 inset-x-0 z-50 border-b border-sage/20 bg-offwhite/80 backdrop-blur-md">
@@ -28,8 +44,9 @@ export default function Navbar() {
           </NavLink>
           <NavLink
             to="/explore"
+            onClick={handleExplore}
             className={({ isActive }) =>
-              `px-3 py-1.5 text-sm rounded-md transition ${
+              `px-3 py-1.5 text-sm rounded-md transition cursor-pointer ${
                 isActive
                   ? 'text-sage-dark bg-sage/10 font-medium'
                   : 'text-stone-500 hover:text-stone-800 hover:bg-sage/10'
@@ -52,8 +69,8 @@ export default function Navbar() {
                 />
               </Link>
               <button
-                onClick={logout}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-stone-500 hover:text-stone-800 hover:bg-sage/10 rounded-md transition"
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-stone-500 hover:text-stone-800 hover:bg-sage/10 rounded-md transition cursor-pointer"
               >
                 <LogOut size={15} />
                 Çıkış Yap
@@ -61,18 +78,18 @@ export default function Navbar() {
             </>
           ) : (
             <>
-              <Link
-                to="/auth"
-                className="px-3 py-1.5 text-sm text-stone-500 hover:text-stone-800 hover:bg-sage/10 rounded-md transition"
+              <button
+                onClick={() => openAuthModal('login')}
+                className="px-3 py-1.5 text-sm text-stone-500 hover:text-stone-800 hover:bg-sage/10 rounded-md transition cursor-pointer"
               >
                 Giriş Yap
-              </Link>
-              <Link
-                to="/auth?mode=register"
-                className="px-3.5 py-1.5 text-sm font-medium text-white bg-sage hover:bg-sage-dark rounded-lg transition"
+              </button>
+              <button
+                onClick={() => openAuthModal('register')}
+                className="px-3.5 py-1.5 text-sm font-medium text-white bg-sage hover:bg-sage-dark rounded-lg transition cursor-pointer"
               >
                 Kaydol
-              </Link>
+              </button>
             </>
           )}
         </div>

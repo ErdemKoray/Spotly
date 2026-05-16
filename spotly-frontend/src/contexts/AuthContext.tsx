@@ -6,7 +6,7 @@ interface User {
   email: string
   first_name: string
   last_name: string
-  age: number | null
+  birth_date: string | null   // ISO date string "YYYY-MM-DD"
   phone: string | null
 }
 

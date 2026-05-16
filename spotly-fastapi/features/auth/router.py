@@ -24,7 +24,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         hashed_password=hash_password(payload.password),
         first_name=payload.first_name,
         last_name=payload.last_name,
-        age=payload.age,
+        birth_date=payload.birth_date,
         phone=payload.phone,
     )
     db.add(user)
@@ -55,7 +55,6 @@ def update_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Kullanıcıyı mevcut session üzerinden taze olarak çek
     user = db.get(User, current_user.id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kullanıcı bulunamadı.")

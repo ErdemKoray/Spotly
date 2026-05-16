@@ -1,3 +1,4 @@
+from datetime import date
 from pydantic import BaseModel, EmailStr
 
 
@@ -6,7 +7,7 @@ class RegisterRequest(BaseModel):
     password: str
     first_name: str
     last_name: str
-    age: int | None = None
+    birth_date: date | None = None
     phone: str | None = None
 
 
@@ -18,7 +19,7 @@ class LoginRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
-    age: int | None = None
+    birth_date: date | None = None
     phone: str | None = None
 
 
@@ -27,7 +28,7 @@ class UserResponse(BaseModel):
     email: str
     first_name: str
     last_name: str
-    age: int | None
+    birth_date: date | None
     phone: str | None
 
     model_config = {"from_attributes": True}

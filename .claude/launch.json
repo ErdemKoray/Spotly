@@ -5,15 +5,8 @@
       "name": "spotly-frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "5173"],
-      "cwd": "/Users/korayerdem/Documents/GitHub/Spotly/.claude/worktrees/distracted-almeida-586cea/spotly-frontend",
+      "cwd": "spotly-frontend",
       "port": 5173
-    },
-    {
-      "name": "spotly-worktree",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
-      "cwd": "/Users/korayerdem/Documents/GitHub/Spotly/.claude/worktrees/distracted-almeida-586cea/spotly-frontend",
-      "port": 5174
     }
   ]
 }
