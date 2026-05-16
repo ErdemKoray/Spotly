@@ -136,7 +136,7 @@ export function ImagePickerModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 16 }}
             transition={{ duration: 0.28, ease: easing }}
-            className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden"
+            className="w-full max-w-2xl bg-offwhite rounded-3xl shadow-2xl overflow-hidden"
           >
             {/* ── Header ── */}
             <div className="flex items-center justify-between px-7 pt-6 pb-5 border-b border-stone-100">

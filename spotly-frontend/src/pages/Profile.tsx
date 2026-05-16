@@ -44,7 +44,7 @@ function BentoCard({ children, className = '', style }: {
 }) {
   return (
     <motion.div variants={item}
-      className={`bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden ${className}`}
+      className={`bg-offwhite rounded-2xl border border-stone-100 shadow-sm overflow-hidden ${className}`}
       style={style}>
       {children}
     </motion.div>

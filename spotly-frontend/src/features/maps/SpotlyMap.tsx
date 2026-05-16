@@ -44,6 +44,22 @@ function isPointInPolygon(lat: number, lng: number, polygon: [number, number][])
   return inside
 }
 
+// ── Sabit rota renkleri (index'e göre, hiç değişmez) ─────────────────────
+const ROUTE_COLORS = ['#ef4444', '#78938A'] // 0=Kırmızı(En Kısa), 1=Adaçayı(Keşif)
+
+function routeStyle(routeIndex: number, isActive: boolean): L.PathOptions {
+  const color = ROUTE_COLORS[routeIndex] ?? '#94a3b8'
+  // Her iki rota da her zaman kesikli — sadece kalınlık/opaklık değişir
+  return {
+    color,
+    dashArray: '5,10',
+    lineCap: 'round' as const,
+    lineJoin: 'round' as const,
+    weight:  isActive ? 6 : 4,
+    opacity: isActive ? 1 : 0.5,
+  }
+}
+
 // ── Leaflet default icon fix (Vite bundle) ────────────────────────────────
 // @ts-expect-error
 delete L.Icon.Default.prototype._getIconUrl
@@ -54,8 +70,8 @@ L.Icon.Default.mergeOptions({
 })
 
 // ── Constants ─────────────────────────────────────────────────────────────
-const MAP_CENTER: [number, number] = [41.022, 28.974]
-const MAP_ZOOM = 13
+const MAP_CENTER: [number, number] = [41.0168, 28.9470]
+const MAP_ZOOM = 14
 
 function extractFatihRing(): [number, number][] {
   const fatih = DISTRICTS.features.find((f) => f.properties?.name === 'Fatih')
@@ -88,31 +104,35 @@ const PLACE_ICON = makePin('#ef4444', 16)
 const START_ICON = makePin('#10b981', 22)
 const END_ICON   = makePin('#3b82f6', 22)
 
-function makeWaypointPin(n: number): L.DivIcon {
+function makeWaypointPin(n: number, color = '#6A8267'): L.DivIcon {
   return L.divIcon({
     className: '',
-    html: `<div style="width:26px;height:26px;background:#6A8267;border:2.5px solid #fff;border-radius:50%;box-shadow:0 2px 10px rgba(0,0,0,0.40);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800">${n}</div>`,
+    html: `<div style="width:26px;height:26px;background:${color};border:2.5px solid #fff;border-radius:50%;box-shadow:0 2px 10px rgba(0,0,0,0.40);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800">${n}</div>`,
     iconSize:    [26, 26],
     iconAnchor:  [13, 13],
     popupAnchor: [0, -19],
   })
 }
 
+// Waypoint pin renkleri rota renkleriyle eşleşir
+const WAYPOINT_COLORS = ROUTE_COLORS
+
 // ── Props ──────────────────────────────────────────────────────────────────
 export interface SpotlyMapProps {
-  routeType?:      'photo' | 'tourist' | null
-  places?:         Place[]
-  startCoords:     Coords | null
-  endCoords:       Coords | null
-  startPlaceId?:   number | null
-  endPlaceId?:     number | null
-  activeRoute?:    RouteOption | null
-  onMapClick:      (c: Coords) => void
-  onOutOfZone?:    () => void
-  onOsrmError?:    () => void
-  onBaselineDist?: (km: number) => void
-  onSetStart:      (p: Place) => void
-  onSetEnd:        (p: Place) => void
+  routeType?:       'photo' | 'tourist' | null
+  places?:          Place[]
+  startCoords:      Coords | null
+  endCoords:        Coords | null
+  startPlaceId?:    number | null
+  endPlaceId?:      number | null
+  routes?:          RouteOption[]
+  activeRouteIndex?: number
+  onMapClick:       (c: Coords) => void
+  onOutOfZone?:     () => void
+  onOsrmError?:     () => void
+  onBaselineDist?:  (km: number) => void
+  onSetStart:       (p: Place) => void
+  onSetEnd:         (p: Place) => void
 }
 
 export default function SpotlyMap({
@@ -121,7 +141,8 @@ export default function SpotlyMap({
   endCoords,
   startPlaceId,
   endPlaceId,
-  activeRoute,
+  routes = [],
+  activeRouteIndex = 0,
   onMapClick,
   onOutOfZone,
   onOsrmError,
@@ -137,26 +158,30 @@ export default function SpotlyMap({
   const freeStartRef       = useRef<L.Marker | null>(null)
   const freeEndRef         = useRef<L.Marker | null>(null)
   const baselinePolyRef    = useRef<L.Polyline | null>(null)
-  const experiencePolyRef  = useRef<L.Polyline | null>(null)
-  const waypointMarkersRef = useRef<L.Marker[]>([])
+  // Multi-route refs
+  const routePolylinesRef  = useRef<(L.Polyline | null)[]>([])
+  const routeMarkersRef    = useRef<(L.Marker | null)[][]>([])
 
   // Stable callback refs — prevent stale closures in effects
-  const onMapClickRef     = useRef(onMapClick)
-  const onOutOfZoneRef    = useRef(onOutOfZone)
-  const onOsrmErrorRef    = useRef(onOsrmError)
-  const onBaselineDistRef = useRef(onBaselineDist)
-  const onSetStartRef     = useRef(onSetStart)
-  const onSetEndRef       = useRef(onSetEnd)
-  useEffect(() => { onMapClickRef.current     = onMapClick })
-  useEffect(() => { onOutOfZoneRef.current    = onOutOfZone })
-  useEffect(() => { onOsrmErrorRef.current    = onOsrmError })
-  useEffect(() => { onBaselineDistRef.current = onBaselineDist })
-  useEffect(() => { onSetStartRef.current     = onSetStart })
-  useEffect(() => { onSetEndRef.current       = onSetEnd })
+  const onMapClickRef      = useRef(onMapClick)
+  const onOutOfZoneRef     = useRef(onOutOfZone)
+  const onOsrmErrorRef     = useRef(onOsrmError)
+  const onBaselineDistRef  = useRef(onBaselineDist)
+  const onSetStartRef      = useRef(onSetStart)
+  const onSetEndRef        = useRef(onSetEnd)
+  const activeRouteIndexRef = useRef(activeRouteIndex)
+  const routesRef           = useRef(routes)
+  useEffect(() => { onMapClickRef.current      = onMapClick })
+  useEffect(() => { onOutOfZoneRef.current     = onOutOfZone })
+  useEffect(() => { onOsrmErrorRef.current     = onOsrmError })
+  useEffect(() => { onBaselineDistRef.current  = onBaselineDist })
+  useEffect(() => { onSetStartRef.current      = onSetStart })
+  useEffect(() => { onSetEndRef.current        = onSetEnd })
+  useEffect(() => { activeRouteIndexRef.current = activeRouteIndex })
+  useEffect(() => { routesRef.current           = routes })
 
-  // Quota protection: skip re-fetch for identical coords
-  const lastBaselineKey   = useRef<string | null>(null)
-  const lastExperienceKey = useRef<string | null>(null)
+  // Quota protection for baseline
+  const lastBaselineKey = useRef<string | null>(null)
 
   const selectionDone = !!(startCoords && endCoords)
   const placesInZone  = useMemo(
@@ -249,7 +274,6 @@ export default function SpotlyMap({
       tooltip.setContent(`<span style="font-size:12px;font-weight:600;color:#111827;white-space:nowrap">${place.name}</span>`)
       marker.bindTooltip(tooltip)
 
-      // Popup content built imperatively to avoid stale closures
       const popupEl = document.createElement('div')
       popupEl.style.cssText = 'padding:6px 2px 2px;min-width:190px'
 
@@ -327,14 +351,16 @@ export default function SpotlyMap({
     }
   }, [startCoords, endCoords, startPlaceId, endPlaceId])
 
-  // ── EFFECT 5: Baseline polyline (red dashed, start→end direct) ────────
+  // ── EFFECT 5: Baseline polyline (dashed, start→end direct) ────────────
   const sLat = startCoords?.lat, sLng = startCoords?.lng
   const eLat = endCoords?.lat,   eLng = endCoords?.lng
+  const hasRoutes = routes.length > 0
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
 
-    if (sLat == null || sLng == null || eLat == null || eLng == null) {
+    // Hide baseline once routes are drawn
+    if (hasRoutes || sLat == null || sLng == null || eLat == null || eLng == null) {
       baselinePolyRef.current?.remove(); baselinePolyRef.current = null
       lastBaselineKey.current = null
       return
@@ -359,54 +385,91 @@ export default function SpotlyMap({
 
     return () => ac.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sLat, sLng, eLat, eLng])
+  }, [sLat, sLng, eLat, eLng, hasRoutes])
 
-  // ── EFFECT 6: Experience polyline + waypoint markers ──────────────────
-  const wpKey = activeRoute && activeRoute.waypoints.length >= 2
-    ? activeRoute.waypoints.map(([la, lo]) => `${la.toFixed(6)},${lo.toFixed(6)}`).join('|')
-    : null
+  // ── EFFECT 6a: Fetch & draw all routes ───────────────────────────────
+  // Re-runs only when the set of routes (waypoints) changes, not on index change
+  const allWpKeys = routes
+    .map(r => r.waypoints.map(([la, lo]) => `${la.toFixed(6)},${lo.toFixed(6)}`).join('|'))
+    .join('||')
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
 
-    experiencePolyRef.current?.remove(); experiencePolyRef.current = null
-    waypointMarkersRef.current.forEach(m => m.remove()); waypointMarkersRef.current = []
-    lastExperienceKey.current = null
+    // Clear all previous route layers
+    routePolylinesRef.current.forEach(p => p?.remove())
+    routePolylinesRef.current = []
+    routeMarkersRef.current.forEach(ms => ms?.forEach(m => m?.remove()))
+    routeMarkersRef.current = []
 
-    if (!wpKey || !activeRoute) return
-    if (wpKey === lastExperienceKey.current) return
+    const validRoutes = routes.filter(r => r.waypoints.length >= 2)
+    if (!validRoutes.length || !map) return
 
     const ac = new AbortController()
+    const curActiveIdx = activeRouteIndexRef.current
 
-    fetchMapboxWalking(activeRoute.waypoints, ac.signal)
-      .then(({ path }) => {
-        if (!mapRef.current) return
-        lastExperienceKey.current = wpKey
+    // Initialize arrays
+    validRoutes.forEach((_, i) => {
+      routePolylinesRef.current[i] = null
+      routeMarkersRef.current[i] = []
+    })
 
-        experiencePolyRef.current = L.polyline(path, {
-          color: '#879F84', weight: 6, opacity: 0.95, lineCap: 'round', lineJoin: 'round',
-        }).addTo(mapRef.current)
+    // Fetch all routes in parallel
+    validRoutes.forEach((route, i) => {
+      fetchMapboxWalking(route.waypoints, ac.signal)
+        .then(({ path }) => {
+          if (!mapRef.current || ac.signal.aborted) return
+          const isActive = i === curActiveIdx
 
-        activeRoute.places.forEach((place: PlaceInRoute) => {
-          const m = L.marker([place.latitude, place.longitude], { icon: makeWaypointPin(place.order) })
-            .addTo(mapRef.current!)
-          m.bindTooltip(
-            `<span style="font-size:12px;font-weight:700;color:#3d4c3b">${place.order}. ${place.name}</span>`,
-            { direction: 'top', offset: [0, -14], opacity: 1 },
-          )
-          waypointMarkersRef.current.push(m)
+          const poly = L.polyline(path, routeStyle(i, isActive)).addTo(mapRef.current)
+          if (isActive) poly.bringToFront()
+          routePolylinesRef.current[i] = poly
+
+          // Waypoint markers for active route only
+          const wpColor = WAYPOINT_COLORS[i] ?? '#6A8267'
+          const markers: L.Marker[] = route.places.map((place: PlaceInRoute) => {
+            const m = L.marker([place.latitude, place.longitude], {
+              icon: makeWaypointPin(place.order, wpColor),
+              opacity: isActive ? 1 : 0,
+            }).addTo(mapRef.current!)
+            m.bindTooltip(
+              `<span style="font-size:12px;font-weight:700;color:#3d4c3b">${place.order}. ${place.name}</span>`,
+              { direction: 'top', offset: [0, -14], opacity: 1 },
+            )
+            return m
+          })
+          routeMarkersRef.current[i] = markers
         })
-      })
-      .catch(err => {
-        if (err?.name === 'AbortError') return
-        console.error('[Mapbox experience]', err)
-        onOsrmErrorRef.current?.()
-      })
+        .catch(err => {
+          if (err?.name === 'AbortError') return
+          console.error(`[Mapbox route ${i}]`, err)
+          onOsrmErrorRef.current?.()
+        })
+    })
 
     return () => ac.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wpKey])
+  }, [allWpKeys])
+
+  // ── EFFECT 6b: Restyle routes on activeRouteIndex change (no re-fetch) ─
+  useEffect(() => {
+    // Restyle polylines
+    routePolylinesRef.current.forEach((poly, i) => {
+      if (!poly) return
+      const isActive = i === activeRouteIndex
+      poly.setStyle(routeStyle(i, isActive))
+      if (isActive) poly.bringToFront()
+    })
+
+    // Toggle waypoint marker opacity
+    routeMarkersRef.current.forEach((markers, i) => {
+      const isActive = i === activeRouteIndex
+      markers?.forEach(m => {
+        // Use setOpacity to show/hide without removing from map
+        m.setOpacity(isActive ? 1 : 0)
+      })
+    })
+  }, [activeRouteIndex])
 
   return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />
 }

@@ -137,7 +137,7 @@ function Input({ label, error, rightEl, className = '', ...props }: InputProps) 
         <input
           className={`w-full px-4 py-2.5 rounded-xl border bg-stone-50 text-stone-800 text-sm
             placeholder-stone-300 outline-none transition-all duration-200
-            focus:bg-white focus:border-sage focus:ring-2 focus:ring-sage/20
+            focus:bg-offwhite focus:border-sage focus:ring-2 focus:ring-sage/20
             ${error ? 'border-red-300 ring-2 ring-red-100' : 'border-stone-200'}
             ${rightEl ? 'pr-11' : ''} ${className}`}
           {...props}
@@ -465,7 +465,7 @@ export function AuthModal({ open, onOpenChange, initialMode = 'login' }: AuthMod
               y:        { duration: 0.3,  ease: easing },
               layout:   { duration: 0.4,  ease: easing },
             }}
-            className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex my-auto"
+            className="w-full max-w-4xl bg-offwhite rounded-3xl shadow-2xl overflow-hidden flex my-auto"
           >
             <LeftPanel />
 

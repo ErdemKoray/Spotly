@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, Landmark, ArrowRight, Navigation, MapPin, X,
-  CheckCircle2, Zap, Scale, Star, RotateCcw, Loader2,
-  Map, LogOut, ChevronRight,
+  CheckCircle2, Zap, Star, RotateCcw, Loader2,
+  Map, LogOut, Clock, Route,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SpotlyMap from '../features/maps/SpotlyMap'
@@ -13,14 +13,39 @@ import { useAuth } from '../contexts/AuthContext'
 
 type RouteType = 'photo' | 'tourist' | null
 
-const TIER_META: Record<
-  'A' | 'B' | 'C',
-  { icon: typeof Zap; color: string; bg: string; border: string; ring: string; hex: string }
-> = {
-  A: { icon: Zap,   color: 'text-amber-600',  bg: 'bg-amber-50',  border: 'border-amber-200',  ring: 'ring-amber-100',  hex: '#d97706' },
-  B: { icon: Scale, color: 'text-sage-dark',  bg: 'bg-sage/10',   border: 'border-sage/40',    ring: 'ring-sage/20',    hex: '#6A8267' },
-  C: { icon: Star,  color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200', ring: 'ring-violet-100', hex: '#7c3aed' },
-}
+// Two-slot route card metadata (index 0 = shortest, index 1 = recommended)
+const ROUTE_CARD_META = [
+  {
+    title: 'En Kısa Yol',
+    Icon: Zap,
+    activeBorder:  'border-amber-400',
+    activeBg:      'bg-amber-50/60',
+    activeRing:    'ring-1 ring-amber-200',
+    passiveBorder: 'border-gray-200',
+    passiveBg:     'bg-gray-50',
+    iconActiveBg:  'bg-amber-100',
+    iconActiveColor: 'text-amber-600',
+    iconPassiveBg:  'bg-gray-100',
+    iconPassiveColor: 'text-gray-400',
+    titleColor:    'text-amber-700',
+    hex:           '#d97706',
+  },
+  {
+    title: 'Önerilen Keşif Rotası',
+    Icon: Star,
+    activeBorder:  'border-sage',
+    activeBg:      'bg-sage/10',
+    activeRing:    'ring-1 ring-sage/30',
+    passiveBorder: 'border-gray-200',
+    passiveBg:     'bg-gray-50',
+    iconActiveBg:  'bg-sage/15',
+    iconActiveColor: 'text-sage-dark',
+    iconPassiveBg:  'bg-gray-100',
+    iconPassiveColor: 'text-gray-400',
+    titleColor:    'text-sage-dark',
+    hex:           '#78938A',
+  },
+] as const
 
 const ease = [0.25, 0.46, 0.45, 0.94] as const
 
@@ -64,15 +89,25 @@ export default function Explore() {
   const [startName, setStartName]             = useState<string | null>(null)
   const [endName, setEndName]                 = useState<string | null>(null)
   const [zoneError, setZoneError]             = useState(false)
+  const [serverError, setServerError]         = useState<string | null>(null)
   const [routes, setRoutes]                   = useState<RouteOption[]>([])
-  const [selectedRouteId, setSelectedRouteId] = useState<'A' | 'B' | 'C' | null>(null)
+  const [activeRouteIndex, setActiveRouteIndex] = useState<number>(0)
   const [calculating, setCalculating]         = useState(false)
   const [routeError, setRouteError]           = useState<string | null>(null)
   const [baselineDistKm, setBaselineDistKm]   = useState<number | null>(null)
   const zoneTimer                             = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const serverTimer                           = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showServerError(msg: string) {
+    setServerError(msg)
+    if (serverTimer.current) clearTimeout(serverTimer.current)
+    serverTimer.current = setTimeout(() => setServerError(null), 4000)
+  }
 
   useEffect(() => {
-    api.get<Place[]>('/places').then(({ data }) => setPlaces(data))
+    api.get<Place[]>('/places')
+      .then(({ data }) => setPlaces(data))
+      .catch(() => showServerError('Sunucuya bağlanılamadı, lütfen daha sonra tekrar deneyin.'))
   }, [])
 
   function handleMapClick(coords: Coords) {
@@ -94,21 +129,21 @@ export default function Explore() {
   }
   function clearStart() {
     setStartCoords(null); setStartPlaceId(null); setStartName(null)
-    if (routes.length) { setRoutes([]); setSelectedRouteId(null) }
+    if (routes.length) { setRoutes([]); setActiveRouteIndex(0) }
   }
   function clearEnd() {
     setEndCoords(null); setEndPlaceId(null); setEndName(null)
-    if (routes.length) { setRoutes([]); setSelectedRouteId(null) }
+    if (routes.length) { setRoutes([]); setActiveRouteIndex(0) }
   }
   function clearAll() {
     setStartCoords(null); setStartPlaceId(null); setStartName(null)
     setEndCoords(null);   setEndPlaceId(null);   setEndName(null)
-    setRoutes([]);        setSelectedRouteId(null); setRouteError(null)
+    setRoutes([]);        setActiveRouteIndex(0); setRouteError(null)
   }
 
   async function handleCalculate() {
     if (!startCoords || !endCoords || !selected) return
-    setCalculating(true); setRouteError(null); setRoutes([]); setSelectedRouteId(null)
+    setCalculating(true); setRouteError(null); setRoutes([]); setActiveRouteIndex(0)
     try {
       const { data } = await api.post('/routes/calculate', {
         start_lat: startCoords.lat, start_lng: startCoords.lng,
@@ -116,124 +151,92 @@ export default function Explore() {
         route_type: selected,
       })
       setRoutes(data.routes)
-      if (data.routes.length > 0) setSelectedRouteId(data.routes[0].id)
-    } catch {
-      setRouteError('Rota hesaplanamadı. Lütfen tekrar deneyin.')
+      setActiveRouteIndex(0)
+    } catch (err: unknown) {
+      const isNetwork = err instanceof Error && (err.message.includes('Network') || err.message.includes('ECONNREFUSED') || (err as { code?: string }).code === 'ERR_NETWORK')
+      if (isNetwork) {
+        showServerError('Sunucuya bağlanılamadı, lütfen daha sonra tekrar deneyin.')
+      } else {
+        setRouteError('Rota hesaplanamadı. Lütfen tekrar deneyin.')
+      }
     } finally {
       setCalculating(false)
     }
   }
 
-  const step        = !startCoords ? 'start' : !endCoords ? 'end' : 'done'
-  const canSubmit   = !!(selected && startCoords && endCoords)
-  const hasRoutes   = routes.length > 0
-  const activeRoute = routes.find(r => r.id === selectedRouteId) ?? null
+  const step      = !startCoords ? 'start' : !endCoords ? 'end' : 'done'
+  const canSubmit = !!(selected && startCoords && endCoords)
+  const hasRoutes = routes.length > 0
 
-  const panelTitle = hasRoutes ? 'Rotanı seç' : step !== 'done' ? 'Noktaları belirle' : 'Rota tipini seç'
+  const panelTitle = hasRoutes ? 'Alternatif rotalar' : step !== 'done' ? 'Noktaları belirle' : 'Rota tipini seç'
 
   /* ─── shared spring ─── */
   const spring = { type: 'spring', stiffness: 380, damping: 30 } as const
 
   return (
-    <div className="fixed inset-0 overflow-hidden">
+    <div className="flex flex-col h-screen w-full overflow-hidden bg-stone-50">
 
-      {/* ══ Harita ══ */}
-      <div className="absolute inset-0 z-0">
-        <SpotlyMap
-          places={places}
-          startCoords={startCoords}
-          endCoords={endCoords}
-          startPlaceId={startPlaceId}
-          endPlaceId={endPlaceId}
-          activeRoute={activeRoute}
-          onMapClick={handleMapClick}
-          onOutOfZone={handleOutOfZone}
-          onBaselineDist={setBaselineDistKm}
-          onSetStart={handleSetStart}
-          onSetEnd={handleSetEnd}
-        />
-      </div>
-
-      {/* ══ Floating Top Bar ══ */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease }}
-        className="absolute top-4 left-4 right-4 z-[1100] flex items-center justify-between pointer-events-none"
-      >
+      {/* ══ Üst Sabit Navbar ══ */}
+      <header className="w-full h-16 bg-white/90 backdrop-blur-md border-b border-stone-200 shadow-sm flex items-center justify-between px-6 shrink-0 z-20">
         {/* Logo */}
-        <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}>
-          <Link
-            to="/"
-            className="pointer-events-auto flex items-center gap-2.5 bg-white/90 backdrop-blur-xl shadow-lg shadow-black/10 border border-white/70 rounded-2xl px-4 py-2.5 text-sage-dark font-bold text-sm tracking-tight"
-          >
-            <Map size={16} strokeWidth={2.5} />
-            Spotly
-          </Link>
-        </motion.div>
+        <Link
+          to="/"
+          className="flex items-center gap-2 text-sage-dark font-bold text-sm tracking-tight hover:opacity-80 transition-opacity"
+        >
+          <Map size={17} strokeWidth={2.5} />
+          Spotly
+        </Link>
 
-        {/* User pill */}
+        {/* Sağ aksiyonlar */}
         {user && (
-          <div className="pointer-events-auto flex items-center gap-1 bg-white/90 backdrop-blur-xl shadow-lg shadow-black/10 border border-white/70 rounded-2xl px-2 py-1.5">
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={{ duration: 0.15 }}>
-              <Link to="/profile" title={`${user.first_name} ${user.last_name}`}>
-                <img
-                  src={avatarUrl(user.first_name, user.last_name)}
-                  alt="Profil"
-                  className="w-8 h-8 rounded-xl border-2 border-transparent hover:border-sage object-cover transition-colors"
-                />
-              </Link>
-            </motion.div>
-            <div className="w-px h-4 bg-gray-200 mx-1" />
-            <motion.button
+          <div className="flex items-center gap-2">
+            <Link to="/profile" title={`${user.first_name} ${user.last_name}`}>
+              <img
+                src={avatarUrl(user.first_name, user.last_name)}
+                alt="Profil"
+                className="w-8 h-8 rounded-xl border-2 border-transparent hover:border-sage object-cover transition-colors cursor-pointer"
+              />
+            </Link>
+            <div className="w-px h-4 bg-stone-300" />
+            <button
               onClick={logout}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ duration: 0.15 }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-stone-400 hover:text-stone-700 hover:bg-sage/10 rounded-xl transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-500 hover:text-stone-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
             >
               <LogOut size={13} />
-              <span className="hidden sm:inline">Çıkış</span>
-            </motion.button>
+              Çıkış
+            </button>
           </div>
         )}
-      </motion.div>
+      </header>
 
-      {/* ══ Floating Sol Panel ══ */}
-      <motion.aside
-        initial={{ opacity: 0, x: -32 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.5, ease, delay: 0.1 }}
-        className="absolute top-20 left-4 bottom-4 z-[1000] w-80 flex flex-col rounded-3xl overflow-hidden"
-        style={{
-          background: 'rgba(255,255,255,0.88)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.18), 0 0 0 1px rgba(255,255,255,0.6) inset',
-        }}
-      >
-        {/* Panel header */}
-        <div className="flex-shrink-0 px-5 pt-5 pb-4 border-b border-gray-100/60">
-          <div className="flex items-center gap-1.5 text-sage-dark text-[10px] font-bold uppercase tracking-widest mb-2">
-            <Navigation size={10} />
-            Rota Planlayıcı
+      {/* ══ Alt İçerik Alanı ══ */}
+      <div className="flex flex-1 overflow-hidden w-full">
+
+        {/* ── Sol Sidebar — Rota Paneli ── */}
+        <aside className="w-[320px] h-full bg-white/90 backdrop-blur-md border-r border-stone-200 flex-shrink-0 flex flex-col z-10" style={{ boxShadow: '4px 0 24px rgba(0,0,0,0.08)' }}>
+
+          {/* Panel başlığı */}
+          <div className="flex-shrink-0 px-5 pt-5 pb-4 border-b border-stone-100">
+            <div className="flex items-center gap-1.5 text-sage-dark text-[10px] font-bold uppercase tracking-widest mb-1.5">
+              <Navigation size={10} />
+              Rota Planlayıcı
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.h1
+                key={panelTitle}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.22, ease }}
+                className="text-base font-bold text-stone-900 leading-snug"
+              >
+                {panelTitle}
+              </motion.h1>
+            </AnimatePresence>
           </div>
-          <AnimatePresence mode="wait">
-            <motion.h1
-              key={panelTitle}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22, ease }}
-              className="text-base font-bold text-stone-800 leading-snug"
-            >
-              {panelTitle}
-            </motion.h1>
-          </AnimatePresence>
-        </div>
 
-        {/* Scrollable area */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 panel-scroll">
+          {/* Scrollable area */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 panel-scroll">
 
           {/* ─── Koordinat Seçimi ─── */}
           <div className="space-y-1.5">
@@ -249,13 +252,13 @@ export default function Explore() {
                   transition={{ duration: 0.22, ease }}
                   className={`flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl border ${
                     step === 'start'
-                      ? 'bg-emerald-50/80 border-emerald-100 text-emerald-700'
+                      ? 'bg-sage/10 border-sage/25 text-sage-dark'
                       : 'bg-blue-50/80 border-blue-100 text-blue-700'
                   }`}
                 >
                   <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${step === 'start' ? 'bg-emerald-400' : 'bg-blue-400'}`} />
-                    <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${step === 'start' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${step === 'start' ? 'bg-sage' : 'bg-blue-400'}`} />
+                    <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${step === 'start' ? 'bg-sage-dark' : 'bg-blue-500'}`} />
                   </span>
                   {step === 'start' ? 'Başlangıç noktasını seç' : 'Bitiş noktasını seç'}
                 </motion.div>
@@ -266,24 +269,24 @@ export default function Explore() {
             <motion.div
               layout
               animate={{
-                background: startCoords ? 'rgba(209,250,229,0.5)' : step === 'start' ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.4)',
-                borderColor: startCoords ? 'rgba(110,231,183,0.7)' : step === 'start' ? 'rgba(135,159,132,0.4)' : 'rgba(229,231,235,0.8)',
+                background: startCoords ? 'rgba(120,147,138,0.08)' : 'rgba(249,250,251,1)',
+                borderColor: startCoords ? 'rgba(120,147,138,0.50)' : step === 'start' ? 'rgba(120,147,138,0.35)' : 'rgba(229,231,235,1)',
               }}
               transition={{ duration: 0.25 }}
-              className="flex items-center gap-3 rounded-2xl border px-3.5 py-3"
-              style={{ boxShadow: step === 'start' && !startCoords ? '0 0 0 2px rgba(135,159,132,0.15)' : undefined }}
+              className="flex items-center gap-3 rounded-2xl border px-3.5 py-3 shadow-sm"
+              style={{ boxShadow: step === 'start' && !startCoords ? '0 0 0 2px rgba(120,147,138,0.15), 0 1px 3px rgba(0,0,0,0.06)' : '0 1px 3px rgba(0,0,0,0.06)' }}
             >
               <motion.div
-                animate={{ background: startCoords ? 'rgba(209,250,229,1)' : 'rgba(243,244,246,1)' }}
+                animate={{ background: startCoords ? 'rgba(120,147,138,0.15)' : 'rgba(244,241,234,1)' }}
                 transition={{ duration: 0.25 }}
                 className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
               >
                 {startCoords
-                  ? <CheckCircle2 size={15} className="text-emerald-500" />
-                  : <MapPin size={15} className="text-gray-400" />}
+                  ? <CheckCircle2 size={15} className="text-sage" />
+                  : <MapPin size={15} className="text-stone-400" />}
               </motion.div>
               <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Başlangıç</p>
+                <p className="text-[9px] font-bold text-stone-500 uppercase tracking-widest">Başlangıç</p>
                 <AnimatePresence mode="wait">
                   {startCoords ? (
                     <motion.p
@@ -292,7 +295,7 @@ export default function Explore() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 4 }}
                       transition={{ duration: 0.18 }}
-                      className="text-xs font-semibold text-emerald-700 truncate mt-0.5"
+                      className="text-xs font-semibold text-sage-dark truncate mt-0.5"
                     >
                       {startName ?? <span className="font-mono">{fmt(startCoords.lat)}, {fmt(startCoords.lng)}</span>}
                     </motion.p>
@@ -303,7 +306,7 @@ export default function Explore() {
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.15 }}
-                      className="text-xs text-gray-300 mt-0.5"
+                      className="text-xs text-stone-400 mt-0.5"
                     >
                       Seçilmedi
                     </motion.p>
@@ -337,23 +340,24 @@ export default function Explore() {
             <motion.div
               layout
               animate={{
-                background: endCoords ? 'rgba(219,234,254,0.5)' : step === 'end' ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.4)',
-                borderColor: endCoords ? 'rgba(147,197,253,0.7)' : step === 'end' ? 'rgba(147,197,253,0.4)' : 'rgba(229,231,235,0.8)',
+                background: endCoords ? 'rgba(219,234,254,0.35)' : 'rgba(249,250,251,1)',
+                borderColor: endCoords ? 'rgba(147,197,253,0.65)' : step === 'end' ? 'rgba(147,197,253,0.40)' : 'rgba(229,231,235,1)',
               }}
               transition={{ duration: 0.25 }}
               className="flex items-center gap-3 rounded-2xl border px-3.5 py-3"
+              style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}
             >
               <motion.div
-                animate={{ background: endCoords ? 'rgba(219,234,254,1)' : 'rgba(243,244,246,1)' }}
+                animate={{ background: endCoords ? 'rgba(219,234,254,0.8)' : 'rgba(244,241,234,1)' }}
                 transition={{ duration: 0.25 }}
                 className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
               >
                 {endCoords
                   ? <CheckCircle2 size={15} className="text-blue-500" />
-                  : <MapPin size={15} className="text-gray-300" />}
+                  : <MapPin size={15} className="text-stone-400" />}
               </motion.div>
               <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Bitiş</p>
+                <p className="text-[9px] font-bold text-stone-500 uppercase tracking-widest">Bitiş</p>
                 <AnimatePresence mode="wait">
                   {endCoords ? (
                     <motion.p
@@ -373,7 +377,7 @@ export default function Explore() {
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.15 }}
-                      className="text-xs text-gray-300 mt-0.5"
+                      className="text-xs text-stone-400 mt-0.5"
                     >
                       Seçilmedi
                     </motion.p>
@@ -409,7 +413,7 @@ export default function Explore() {
                 >
                   <GlassBtn
                     onClick={clearAll}
-                    className="w-full flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50/80 border border-gray-100 hover:border-red-100 rounded-xl px-3 py-2 transition-colors mt-1"
+                    className="w-full flex items-center justify-center gap-1.5 text-xs text-stone-400 hover:text-red-500 hover:bg-red-50/60 border border-gray-200 hover:border-red-100 rounded-xl px-3 py-2 transition-colors mt-1"
                   >
                     <RotateCcw size={11} />
                     Tüm seçimleri temizle
@@ -419,12 +423,12 @@ export default function Explore() {
             </AnimatePresence>
           </div>
 
-          <div className="border-t border-gray-100/60 mx-0.5" />
+          <div className="border-t border-stone-100 mx-0.5" />
 
           {/* ─── Rota Tipi — Segmented Control ─── */}
           <div className="space-y-2">
             <p className="text-[9px] font-bold text-stone-400 uppercase tracking-widest px-0.5">Rota Tipi</p>
-            <div className="flex gap-1.5 bg-gray-100/60 p-1.5 rounded-2xl">
+            <div className="flex gap-1.5 bg-stone-100 p-1.5 rounded-2xl">
               {[
                 { id: 'photo'   as const, Icon: Camera,  label: 'Fotoğraf' },
                 { id: 'tourist' as const, Icon: Landmark, label: 'Turistik' },
@@ -435,7 +439,7 @@ export default function Explore() {
                   whileTap={{ scale: 0.96 }}
                   transition={{ duration: 0.12 }}
                   className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 relative ${
-                    selected === id ? 'text-sage-dark' : 'text-gray-400 hover:text-gray-600'
+                    selected === id ? 'text-sage-dark' : 'text-stone-500 hover:text-stone-700'
                   }`}
                 >
                   {selected === id && (
@@ -454,7 +458,7 @@ export default function Explore() {
             </div>
           </div>
 
-          {/* ─── Rota Sonuçları ─── */}
+          {/* ─── Rota Sonuçları — 2 Alternatif Kart ─── */}
           <AnimatePresence>
             {hasRoutes && (
               <motion.div
@@ -462,36 +466,41 @@ export default function Explore() {
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.3, ease }}
-                className="space-y-2 overflow-hidden"
+                className="space-y-2.5 overflow-hidden"
               >
-                <div className="border-t border-gray-100/60 mx-0.5 mb-3 mt-1" />
+                <div className="border-t border-stone-100 mx-0.5 mb-1 mt-1" />
 
-                <div className="flex items-center justify-between px-0.5">
+                <div className="flex items-center justify-between px-0.5 mb-1">
                   <p className="text-[9px] font-bold text-stone-400 uppercase tracking-widest">
-                    Hesaplanan Rotalar
+                    Haritada Gösterilen Rotalar
                   </p>
                   <motion.button
                     onClick={clearAll}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     transition={{ duration: 0.12 }}
-                    className="flex items-center gap-1 text-[10px] font-medium text-gray-400 hover:text-sage-dark transition-colors"
+                    className="flex items-center gap-1 text-[10px] font-medium text-gray-400 hover:text-red-500 transition-colors"
                   >
                     <RotateCcw size={9} />
                     Sıfırla
                   </motion.button>
                 </div>
 
-                {routes.map((route, i) => {
-                  const meta     = TIER_META[route.id]
-                  const TierIcon = meta.icon
-                  const isActive = selectedRouteId === route.id
+                {routes.slice(0, 2).map((route, i) => {
+                  const meta    = ROUTE_CARD_META[i]
+                  const CardIcon = meta.Icon
+                  const isActive = activeRouteIndex === i
 
-                  let extraBadge: string | null = null
-                  if (baselineDistKm != null) {
-                    const extraM = Math.max(0, Math.round((route.total_distance_km - baselineDistKm) * 1000))
-                    extraBadge = extraM < 50 ? 'En kısa yol'
-                      : extraM < 1000 ? `+${extraM} m` : `+${(extraM / 1000).toFixed(1)} km`
+                  // Comparison badge: only on card 1, vs card 0
+                  let compBadge: { extraMin: number; extraM: number; pct: number } | null = null
+                  if (i === 1 && routes.length >= 2) {
+                    const r0 = routes[0]
+                    const extraKm  = route.total_distance_km - r0.total_distance_km
+                    const extraMin = route.estimated_minutes  - r0.estimated_minutes
+                    const extraM   = Math.round(extraKm * 1000)
+                    const pct      = r0.total_distance_km > 0
+                      ? Math.round((extraKm / r0.total_distance_km) * 100) : 0
+                    compBadge = { extraMin: Math.max(0, extraMin), extraM: Math.max(0, extraM), pct: Math.max(0, pct) }
                   }
 
                   return (
@@ -499,60 +508,82 @@ export default function Explore() {
                       key={route.id}
                       initial={{ opacity: 0, y: 14, scale: 0.97 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ delay: i * 0.07, duration: 0.3, ease }}
+                      transition={{ delay: i * 0.08, duration: 0.3, ease }}
                     >
                       <motion.button
-                        onClick={() => setSelectedRouteId(route.id)}
-                        whileHover={!isActive ? { scale: 1.015, y: -1.5, boxShadow: '0 8px 25px -4px rgba(0,0,0,0.12)' } : {}}
+                        onClick={() => setActiveRouteIndex(i)}
+                        whileHover={!isActive ? { scale: 1.015, y: -1.5 } : {}}
                         whileTap={{ scale: 0.98 }}
                         transition={{ duration: 0.18, ease }}
                         animate={{
                           boxShadow: isActive
-                            ? '0 4px 20px -4px rgba(0,0,0,0.12)'
+                            ? '0 4px 20px -4px rgba(0,0,0,0.14)'
                             : '0 1px 4px -1px rgba(0,0,0,0.06)',
                         }}
-                        className={`w-full text-left rounded-2xl border p-3.5 cursor-pointer transition-colors duration-200 ${
+                        className={`w-full text-left rounded-2xl border-2 p-3.5 cursor-pointer transition-all duration-200 ${
                           isActive
-                            ? `${meta.bg} ${meta.border} ring-1 ${meta.ring}`
-                            : 'bg-white/70 border-gray-100/80 hover:border-gray-200'
+                            ? `${meta.activeBorder} ${meta.activeBg} ${meta.activeRing}`
+                            : `${meta.passiveBorder} ${meta.passiveBg} hover:border-gray-300`
                         }`}
                       >
-                        <div className="flex items-start gap-2.5">
-                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 ${isActive ? `${meta.bg} ${meta.color}` : 'bg-gray-100 text-gray-400'}`}>
-                            <TierIcon size={13} strokeWidth={2} />
+                        {/* Card header */}
+                        <div className="flex items-center gap-2.5 mb-2.5">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+                            isActive ? `${meta.iconActiveBg} ${meta.iconActiveColor}` : `${meta.iconPassiveBg} ${meta.iconPassiveColor}`
+                          }`}>
+                            <CardIcon size={14} strokeWidth={2.2} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-gray-900 leading-tight">{route.label}</p>
-                            <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">{route.description}</p>
-                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                              <span className="text-[10px] font-medium text-gray-500 bg-gray-100/80 rounded-full px-2 py-0.5">📍 {route.places.length} durak</span>
-                              <span className="text-[10px] font-medium text-gray-500 bg-gray-100/80 rounded-full px-2 py-0.5">🗺 {route.total_distance_km.toFixed(1)} km</span>
-                              <span className="text-[10px] font-medium text-gray-500 bg-gray-100/80 rounded-full px-2 py-0.5">⏱ {route.estimated_minutes} dk</span>
-                              {extraBadge && (
-                                <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${
-                                  extraBadge === 'En kısa yol'
-                                    ? 'text-emerald-700 bg-emerald-50 border border-emerald-100'
-                                    : 'text-orange-600 bg-orange-50 border border-orange-100'
-                                }`}>
-                                  {extraBadge === 'En kısa yol' ? '✓ En kısa' : `${extraBadge} fazla`}
-                                </span>
-                              )}
-                            </div>
+                            <p className={`text-xs font-bold leading-tight transition-colors ${isActive ? meta.titleColor : 'text-gray-500'}`}>
+                              {meta.title}
+                            </p>
+                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">{route.label}</p>
                           </div>
-                          <div className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${isActive ? meta.border : 'border-gray-200'}`}>
-                            {isActive && (
-                              <motion.div
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                                transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-                                className="w-1.5 h-1.5 rounded-full"
-                                style={{ background: meta.hex }}
-                              />
-                            )}
-                          </div>
+                          {/* Active indicator dot */}
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 transition-all duration-300 ${isActive ? 'opacity-100' : 'opacity-0'}`}
+                            style={{ background: meta.hex }} />
                         </div>
 
-                        {/* Durak listesi */}
+                        {/* Stats row */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-lg px-2 py-1 ${
+                            isActive ? 'bg-white/70 text-gray-700' : 'bg-white text-gray-500'
+                          }`}>
+                            <Route size={9} strokeWidth={2} />
+                            {route.total_distance_km >= 1
+                              ? `${route.total_distance_km.toFixed(1)} km`
+                              : `${Math.round(route.total_distance_km * 1000)} m`}
+                          </span>
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-lg px-2 py-1 ${
+                            isActive ? 'bg-white/70 text-gray-700' : 'bg-white text-gray-500'
+                          }`}>
+                            <Clock size={9} strokeWidth={2} />
+                            {route.estimated_minutes} dk
+                          </span>
+                          {route.places.length > 0 && (
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-lg px-2 py-1 ${
+                              isActive ? 'bg-white/70 text-gray-700' : 'bg-white text-gray-500'
+                            }`}>
+                              <MapPin size={9} strokeWidth={2} />
+                              {route.places.length} durak
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Comparison badge (only card 1) */}
+                        {compBadge && (
+                          <div className="mt-2 pt-2 border-t border-dashed border-gray-200 flex items-center gap-1.5">
+                            <span className="text-[10px] text-gray-400">En kısa yola göre:</span>
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-100 rounded-full px-2 py-0.5">
+                              {compBadge.extraM >= 1000
+                                ? `+${(compBadge.extraM / 1000).toFixed(1)} km`
+                                : `+${compBadge.extraM} m`}
+                              {' '}·{' '}+{compBadge.extraMin} dk
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Waypoint list (active only) */}
                         <AnimatePresence>
                           {isActive && route.places.length > 0 && (
                             <motion.div
@@ -560,14 +591,15 @@ export default function Explore() {
                               animate={{ opacity: 1, height: 'auto' }}
                               exit={{ opacity: 0, height: 0 }}
                               transition={{ duration: 0.22, ease }}
-                              className="mt-2.5 ml-9 flex flex-col gap-1.5 overflow-hidden"
+                              className="mt-2.5 flex flex-col gap-1 overflow-hidden"
                             >
+                              <div className="w-full border-t border-dashed border-gray-200 mb-1.5" />
                               {route.places.map((p, pi) => (
                                 <motion.div
                                   key={p.id}
                                   initial={{ opacity: 0, x: -6 }}
                                   animate={{ opacity: 1, x: 0 }}
-                                  transition={{ delay: pi * 0.05, duration: 0.2 }}
+                                  transition={{ delay: pi * 0.04, duration: 0.18 }}
                                   className="flex items-center gap-2"
                                 >
                                   <div
@@ -607,7 +639,7 @@ export default function Explore() {
         </div>
 
         {/* ─── CTA Butonu ─── */}
-        <div className="flex-shrink-0 px-4 pb-5 pt-3 border-t border-gray-100/60">
+        <div className="flex-shrink-0 px-4 pb-5 pt-3 border-t border-stone-100">
           <AnimatePresence mode="wait">
             {!hasRoutes ? (
               <motion.div key="calculate" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
@@ -617,7 +649,7 @@ export default function Explore() {
                   className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-semibold text-sm transition-colors duration-300 ${
                     canSubmit && !calculating
                       ? 'bg-sage hover:bg-sage-dark text-white shadow-lg shadow-sage/25 cursor-pointer'
-                      : 'bg-stone-100 text-stone-300 cursor-not-allowed'
+                      : 'bg-stone-100 text-stone-400 cursor-not-allowed'
                   }`}
                 >
                   {calculating
@@ -629,48 +661,92 @@ export default function Explore() {
                 </GlassBtn>
               </motion.div>
             ) : (
-              <motion.div key="show" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <motion.div key="recalc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-2">
+                {/* Info chip */}
+                <p className="text-center text-[10px] text-gray-400 font-medium">
+                  Her iki rota haritada gösteriliyor
+                </p>
                 <GlassBtn
-                  disabled={!selectedRouteId}
-                  className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-semibold text-sm transition-colors duration-300 ${
-                    selectedRouteId
-                      ? 'bg-sage hover:bg-sage-dark text-white shadow-lg shadow-sage/25 cursor-pointer'
-                      : 'bg-stone-100 text-stone-300 cursor-not-allowed'
-                  }`}
+                  onClick={clearAll}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm text-stone-500 hover:text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors duration-200 cursor-pointer"
                 >
-                  <span>Rotayı Haritada Göster</span>
-                  <ChevronRight size={15} />
+                  <RotateCcw size={13} />
+                  Yeniden Başla
                 </GlassBtn>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-      </motion.aside>
+        </aside>
 
-      {/* ══ Zone Error Toast ══ */}
-      <AnimatePresence>
-        {zoneError && (
-          <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.95 }}
-            transition={{ duration: 0.25, ease }}
-            className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[2000] pointer-events-none"
-          >
-            <div
-              className="flex items-center gap-2.5 text-white text-xs font-semibold px-5 py-3 rounded-2xl border border-white/10 whitespace-nowrap"
-              style={{
-                background: 'rgba(17,24,39,0.92)',
-                backdropFilter: 'blur(12px)',
-                boxShadow: '0 20px 40px -8px rgba(0,0,0,0.35)',
-              }}
+        {/* ── Sağ Alan — Harita ── */}
+        <div className="flex-1 h-full relative z-0">
+        <SpotlyMap
+          places={places}
+          startCoords={startCoords}
+          endCoords={endCoords}
+          startPlaceId={startPlaceId}
+          endPlaceId={endPlaceId}
+          routes={routes}
+          activeRouteIndex={activeRouteIndex}
+          onMapClick={handleMapClick}
+          onOutOfZone={handleOutOfZone}
+          onBaselineDist={setBaselineDistKm}
+          onSetStart={handleSetStart}
+          onSetEnd={handleSetEnd}
+        />
+
+        {/* Zone Error Toast */}
+        <AnimatePresence>
+          {zoneError && (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.95 }}
+              transition={{ duration: 0.25, ease }}
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
             >
-              <span>📍</span>
-              <span>Seçilen nokta Spotly hizmet alanı dışında.</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <div
+                className="flex items-center gap-2.5 text-white text-xs font-semibold px-5 py-3 rounded-2xl border border-white/10 whitespace-nowrap"
+                style={{
+                  background: 'rgba(17,24,39,0.92)',
+                  backdropFilter: 'blur(12px)',
+                  boxShadow: '0 20px 40px -8px rgba(0,0,0,0.35)',
+                }}
+              >
+                <span>📍</span>
+                <span>Seçilen nokta Spotly hizmet alanı dışında.</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Server Error Toast */}
+        <AnimatePresence>
+          {serverError && (
+            <motion.div
+              initial={{ opacity: 0, y: -16, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.95 }}
+              transition={{ duration: 0.25, ease }}
+              className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
+            >
+              <div
+                className="flex items-center gap-2.5 text-white text-xs font-semibold px-5 py-3 rounded-2xl border border-red-500/20 whitespace-nowrap"
+                style={{
+                  background: 'rgba(127,29,29,0.92)',
+                  backdropFilter: 'blur(12px)',
+                  boxShadow: '0 20px 40px -8px rgba(0,0,0,0.35)',
+                }}
+              >
+                <span>⚠️</span>
+                <span>{serverError}</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        </div>{/* ── Sağ Alan sonu ── */}
+      </div>{/* ── Alt İçerik Alanı sonu ── */}
 
     </div>
   )

@@ -140,7 +140,7 @@ export default function Home() {
                   {...fadeUpView(i * 0.1)}
                   whileHover={{ y: -5, boxShadow: '0 16px 40px -8px rgba(0,0,0,0.10)' }}
                   transition={{ duration: 0.22 }}
-                  className={`bg-white border border-gray-100 ${f.border} rounded-2xl p-7 flex flex-col gap-5 cursor-default transition-colors`}
+                  className={`bg-offwhite border border-gray-100 ${f.border} rounded-2xl p-7 flex flex-col gap-5 cursor-default transition-colors`}
                   style={{ boxShadow: '0 2px 8px -2px rgba(0,0,0,0.06)' }}
                 >
                   <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${f.accent}`}>
