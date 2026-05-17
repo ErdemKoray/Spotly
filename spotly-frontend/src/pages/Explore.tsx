@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, Landmark, ArrowRight, Navigation, MapPin, X,
   CheckCircle2, Zap, Star, RotateCcw, Loader2,
-  Map, LogOut, Clock, Route,
+  Map, LogOut, Clock, Route, Bookmark, BookmarkCheck,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SpotlyMap from '../features/maps/SpotlyMap'
@@ -33,12 +33,12 @@ const ROUTE_CARD_META = [
   {
     title: 'Önerilen Keşif Rotası',
     Icon: Star,
-    activeBorder:  'border-sage',
-    activeBg:      'bg-sage/10',
-    activeRing:    'ring-1 ring-sage/30',
+    activeBorder:  'border-[#78938A]',
+    activeBg:      'bg-[#78938A]/8',
+    activeRing:    'ring-1 ring-[#78938A]/40',
     passiveBorder: 'border-gray-200',
     passiveBg:     'bg-gray-50',
-    iconActiveBg:  'bg-sage/15',
+    iconActiveBg:  'bg-[#78938A]/15',
     iconActiveColor: 'text-sage-dark',
     iconPassiveBg:  'bg-gray-100',
     iconPassiveColor: 'text-gray-400',
@@ -94,7 +94,8 @@ export default function Explore() {
   const [activeRouteIndex, setActiveRouteIndex] = useState<number>(0)
   const [calculating, setCalculating]         = useState(false)
   const [routeError, setRouteError]           = useState<string | null>(null)
-  const [baselineDistKm, setBaselineDistKm]   = useState<number | null>(null)
+  const [isSaved, setIsSaved]                 = useState(false)
+  const [saving, setSaving]                   = useState(false)
   const zoneTimer                             = useRef<ReturnType<typeof setTimeout> | null>(null)
   const serverTimer                           = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -139,11 +140,12 @@ export default function Explore() {
     setStartCoords(null); setStartPlaceId(null); setStartName(null)
     setEndCoords(null);   setEndPlaceId(null);   setEndName(null)
     setRoutes([]);        setActiveRouteIndex(0); setRouteError(null)
+    setIsSaved(false);    setSaving(false)
   }
 
   async function handleCalculate() {
     if (!startCoords || !endCoords || !selected) return
-    setCalculating(true); setRouteError(null); setRoutes([]); setActiveRouteIndex(0)
+    setCalculating(true); setRouteError(null); setRoutes([]); setActiveRouteIndex(0); setIsSaved(false)
     try {
       const { data } = await api.post('/routes/calculate', {
         start_lat: startCoords.lat, start_lng: startCoords.lng,
@@ -161,6 +163,35 @@ export default function Explore() {
       }
     } finally {
       setCalculating(false)
+    }
+  }
+
+  async function handleSaveRecommended(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (isSaved || saving || !startCoords || !endCoords || !selected) return
+    const recommended = routes[1] ?? routes[0]
+    if (!recommended) return
+    setSaving(true)
+    try {
+      await api.post('/saved-routes', {
+        route_type: selected,
+        label: recommended.label,
+        description: recommended.description,
+        total_distance_km: recommended.total_distance_km,
+        estimated_minutes: recommended.estimated_minutes,
+        stop_count: recommended.places.length,
+        start_lat: startCoords.lat,
+        start_lng: startCoords.lng,
+        end_lat: endCoords.lat,
+        end_lng: endCoords.lng,
+        start_name: startName ?? null,
+        end_name: endName ?? null,
+      })
+      setIsSaved(true)
+    } catch {
+      showServerError('Rota kaydedilemedi. Lütfen tekrar giriş yapın.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -445,7 +476,7 @@ export default function Explore() {
                   {selected === id && (
                     <motion.div
                       layoutId="segment-bg"
-                      className="absolute inset-0 bg-white rounded-xl shadow-sm"
+                      className="absolute inset-0 bg-[#78938A]/10 rounded-xl shadow-sm"
                       transition={spring}
                     />
                   )}
@@ -510,7 +541,7 @@ export default function Explore() {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ delay: i * 0.08, duration: 0.3, ease }}
                     >
-                      <motion.button
+                      <motion.div
                         onClick={() => setActiveRouteIndex(i)}
                         whileHover={!isActive ? { scale: 1.015, y: -1.5 } : {}}
                         whileTap={{ scale: 0.98 }}
@@ -520,12 +551,37 @@ export default function Explore() {
                             ? '0 4px 20px -4px rgba(0,0,0,0.14)'
                             : '0 1px 4px -1px rgba(0,0,0,0.06)',
                         }}
-                        className={`w-full text-left rounded-2xl border-2 p-3.5 cursor-pointer transition-all duration-200 ${
+                        className={`relative w-full text-left rounded-2xl border-2 p-3.5 cursor-pointer transition-all duration-200 ${
                           isActive
                             ? `${meta.activeBorder} ${meta.activeBg} ${meta.activeRing}`
                             : `${meta.passiveBorder} ${meta.passiveBg} hover:border-gray-300`
                         }`}
                       >
+                        {/* Bookmark butonu — sadece önerilen kart (i===1), absolute sağ üst */}
+                        {i === 1 && (
+                          <motion.button
+                            onClick={handleSaveRecommended}
+                            whileHover={!isSaved ? { scale: 1.2 } : {}}
+                            whileTap={!isSaved ? { scale: 0.88 } : {}}
+                            transition={{ duration: 0.15 }}
+                            disabled={saving}
+                            title={isSaved ? 'Kaydedildi' : 'Rotayı kaydet'}
+                            className="absolute top-3 right-3 z-10 w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer disabled:cursor-default"
+                            style={{
+                              background: isSaved ? 'rgba(106,130,103,0.18)' : 'rgba(120,147,138,0.12)',
+                              color: isSaved ? '#6A8267' : '#879F84',
+                            }}
+                          >
+                            {saving ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : isSaved ? (
+                              <BookmarkCheck size={13} strokeWidth={2.5} />
+                            ) : (
+                              <Bookmark size={13} strokeWidth={2.5} />
+                            )}
+                          </motion.button>
+                        )}
+
                         {/* Card header */}
                         <div className="flex items-center gap-2.5 mb-2.5">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -539,7 +595,7 @@ export default function Explore() {
                             </p>
                             <p className="text-[10px] text-gray-400 mt-0.5 truncate">{route.label}</p>
                           </div>
-                          {/* Active indicator dot */}
+                          {/* Active indicator dot — tüm kartlarda */}
                           <div className={`w-2 h-2 rounded-full flex-shrink-0 transition-all duration-300 ${isActive ? 'opacity-100' : 'opacity-0'}`}
                             style={{ background: meta.hex }} />
                         </div>
@@ -604,7 +660,7 @@ export default function Explore() {
                                 >
                                   <div
                                     className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold"
-                                    style={{ background: meta.hex, fontSize: '9px' }}
+                                    style={{ background: '#78938A', fontSize: '9px' }}
                                   >
                                     {p.order}
                                   </div>
@@ -614,7 +670,7 @@ export default function Explore() {
                             </motion.div>
                           )}
                         </AnimatePresence>
-                      </motion.button>
+                      </motion.div>
                     </motion.div>
                   )
                 })}
@@ -662,13 +718,12 @@ export default function Explore() {
               </motion.div>
             ) : (
               <motion.div key="recalc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-2">
-                {/* Info chip */}
                 <p className="text-center text-[10px] text-gray-400 font-medium">
                   Her iki rota haritada gösteriliyor
                 </p>
                 <GlassBtn
                   onClick={clearAll}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm text-stone-500 hover:text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors duration-200 cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm text-white bg-[#78938A] hover:bg-[#6A8267] transition-colors duration-200 cursor-pointer shadow-sm"
                 >
                   <RotateCcw size={13} />
                   Yeniden Başla
@@ -691,7 +746,6 @@ export default function Explore() {
           activeRouteIndex={activeRouteIndex}
           onMapClick={handleMapClick}
           onOutOfZone={handleOutOfZone}
-          onBaselineDist={setBaselineDistKm}
           onSetStart={handleSetStart}
           onSetEnd={handleSetEnd}
         />

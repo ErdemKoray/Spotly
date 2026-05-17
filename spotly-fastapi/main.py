@@ -6,6 +6,8 @@ from features.auth.router import router as auth_router
 from features.places.models import Place  # noqa: F401
 from features.places.router import router as places_router
 from features.routes.router import router as routes_router
+from features.saved_routes.models import SavedRoute  # noqa: F401
+from features.saved_routes.router import router as saved_routes_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -140,6 +142,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(places_router)
 app.include_router(routes_router)
+app.include_router(saved_routes_router)
 
 
 @app.get("/health")

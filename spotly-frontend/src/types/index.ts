@@ -32,3 +32,20 @@ export interface RouteOption {
   estimated_minutes: number
   total_score: number
 }
+
+export interface SavedRoute {
+  id: number
+  route_type: 'photo' | 'tourist'
+  label: string
+  description: string
+  total_distance_km: number
+  estimated_minutes: number
+  stop_count: number
+  start_lat: number
+  start_lng: number
+  end_lat: number
+  end_lng: number
+  start_name: string | null
+  end_name: string | null
+  created_at: string
+}
